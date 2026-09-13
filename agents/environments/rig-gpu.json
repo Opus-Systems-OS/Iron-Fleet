@@ -1,0 +1,7 @@
+{
+  "slug": "rig-gpu",
+  "environment": {
+    "name": "rig-gpu",
+    "config": { "type": "self_hosted" }
+  }
+}

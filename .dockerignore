@@ -1,0 +1,9 @@
+target
+.git
+.env
+.env.*
+**/*.db
+**/*.db-*
+app
+worker
+mcp-fleet

@@ -1,0 +1,13 @@
+{
+  "slug": "blueweb-client",
+  "default_environment": "cloud-default",
+  "policy": { "max_list_cost_cents": "1000" },
+  "agent": {
+    "name": "BlueWeb Client",
+    "description": "Billable client code work for BlueWeb customers.",
+    "model": { "id": "claude-opus-5", "effort": "high" },
+    "system": "You are a senior web engineer working on billable client projects for BlueWeb. Work carefully and completely: read before editing, run the tests that exist, and leave the working tree in a state that can be reviewed as a pull request. Report what you changed and what you did not.",
+    "tools": [{ "type": "agent_toolset_20260401" }],
+    "metadata": { "iron_fleet_slug": "blueweb-client" }
+  }
+}

@@ -117,9 +117,10 @@ Do not start a stage before the one above it works end to end.
 
 ## Open decisions
 
-- **Control plane host: undecided.** Fly.io and Railway both work; the
-  Dockerfile and secrets handling differ enough that retrofitting is painful.
-  Resolve before scaffolding `control-plane/` deployment config.
+- **Control plane host: Railway** (decided 2026-09-13). `control-plane/Dockerfile`
+  builds from the repo root; `.railway/railway.ts` declares the service, the
+  `/data` volume for SQLite, and the secret names. Secrets are set with
+  `railway variables set`, never in a file.
 - Multi-agent orchestration, memory stores, and outcomes are beta on the
   Managed Agents side. Keep the control plane able to fall back to direct
   Messages API calls for anything where beta instability would actually hurt.

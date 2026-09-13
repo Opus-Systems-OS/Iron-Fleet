@@ -1,0 +1,135 @@
+# control-plane
+
+The one service Iron-Fleet runs. Holds the agent registry, budget policy and
+usage rollups in SQLite; everything about sessions is read live from the
+Managed Agents API. Stage 1 of the build order: start a session from `curl`,
+receive the webhook back.
+
+## Endpoints
+
+All routes except `/healthz` and `/webhooks/*` require
+`Authorization: Bearer $CONTROL_PLANE_TOKEN`.
+
+| Route | What it does |
+|---|---|
+| `GET /healthz` | Liveness. Railway's healthcheck. |
+| `GET /agents` | The registry as synced: slug, Anthropic agent id/version, cap, effort, default environment. |
+| `POST /sessions` | `{agent_slug, task, environment?}` → creates a Managed Agents session pinned to the synced agent version, with that agent's `max_list_cost` cap and the task as the first `user.message`. Returns `201 {session_id, status, …, console_url}`. |
+| `GET /sessions?agent_slug=&limit=&page=&order=` | Proxies `GET /v1/sessions`; the Anthropic envelope (`data`, `next_page`, `prev_page`) is returned unchanged. |
+| `GET /sessions/{id}` | Proxies `GET /v1/sessions/{id}`; the session object is returned unchanged. |
+| `POST /webhooks/managed-agents` | Anthropic → us. Verifies the Standard Webhooks HMAC, dedupes on event id, handles `session.status_idled` (INFO log) and `session.budget_reached` (WARN log), records a usage rollup. |
+
+Errors are always `{"error": {"type": "...", "message": "..."}}`. Upstream
+Anthropic errors come back as `502` (or `404`/`503` where that is what they
+mean) with `upstream_status` and `request_id` for the support ticket.
+
+## Configuration (environment only)
+
+| Variable | Required | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | yes | |
+| `ANTHROPIC_WEBHOOK_SIGNING_KEY` | yes | The `whsec_…` value shown once when the endpoint is created in Console → Manage → Webhooks. |
+| `CONTROL_PLANE_TOKEN` | yes | Bearer token for the control plane's own API. `openssl rand -hex 32`. |
+| `PORT` | no | Railway injects it. Default `8080`. |
+| `DATABASE_PATH` | no | Default `$RAILWAY_VOLUME_MOUNT_PATH/control-plane.db`, else `./control-plane.db`. |
+| `AGENTS_DIR` | no | Default `./agents`; `/app/agents` in the image. |
+| `SYNC_ON_BOOT` | no | Default `true`. |
+| `ANTHROPIC_WORKSPACE` | no | Default `default`. Only used to build the Console trace URL. |
+| `ANTHROPIC_BASE_URL` | no | For pointing at a mock. |
+| `RUST_LOG` | no | Default `info,tower_http=info`. |
+
+## The registry: `agents/`
+
+`agents/<slug>.json` is the committed, diffable fleet definition:
+
+```jsonc
+{
+  "slug": "jarvis",
+  "default_environment": "cloud-default",
+  "policy": { "max_list_cost_cents": "50" },       // whole cents, as a string — a number is a load error
+  "agent": { /* verbatim POST /v1/agents body; effort lives in agent.model */ }
+}
+```
+
+`agents/environments/<slug>.json` holds `{ "slug", "environment": { verbatim POST /v1/environments body } }`.
+
+On boot (and on `control-plane sync`) the service reconciles this directory
+with Anthropic: unknown agents are created, changed ones (content hash) are
+updated into a new version, unchanged ones are left alone. Environments of
+type `cloud` are created once. `self_hosted` environments (`rig-gpu`) are
+recorded but **not** provisioned — that is stage 2, and the rig owns its key;
+`POST /sessions` for an agent whose environment is not provisioned returns
+`409 environment_not_provisioned`.
+
+Two API facts that shape this:
+
+- **Effort only takes effect on the agent.** A per-session `model` override
+  silently drops it, so effort is in `agent.model.effort`, applied at sync,
+  not at session create.
+- **Budgets are create-only on the session** and denominated in whole US cents
+  as a string. `Cents` in `src/money.rs` is the only type that can occupy that
+  field and the only way to construct one is the validating string parser.
+
+## Local run
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-…
+export ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_…      # any valid whsec_ works locally
+export CONTROL_PLANE_TOKEN=dev
+cargo run -p control-plane                          # boot sync, then listen on :8080
+
+curl -H 'Authorization: Bearer dev' localhost:8080/agents
+curl -H 'Authorization: Bearer dev' -H 'content-type: application/json' \
+     -X POST localhost:8080/sessions \
+     -d '{"agent_slug":"jarvis","task":"Say hello and stop."}'
+curl -H 'Authorization: Bearer dev' localhost:8080/sessions/<session_id>
+```
+
+To exercise the webhook handler without a public URL, sign a body with the dev
+helper (it uses `ANTHROPIC_WEBHOOK_SIGNING_KEY`):
+
+```sh
+BODY='{"type":"event","id":"whe_local_1","created_at":"2026-09-13T17:00:00Z","data":{"type":"session.status_idled","id":"<session_id>"}}'
+H=$(printf '%s' "$BODY" | cargo run -q -p control-plane -- sign-webhook --id whe_local_1)
+eval curl -i $H -H "'content-type: application/json'" -X POST localhost:8080/webhooks/managed-agents --data-binary "'$BODY'"
+```
+
+`control-plane/dev/mock-managed-agents.py` is a wire-shape mock of the
+Managed Agents API (asserts the mandatory headers, echoes bodies) for running
+the whole loop with no spend: `ANTHROPIC_BASE_URL=http://127.0.0.1:9999`.
+
+## Railway deployment
+
+1. `railway login && railway init` in the repo root (or link an existing
+   project). `.railway/railway.ts` describes the service; `railway plan` /
+   `railway apply` create it. If the IaC beta disagrees with that file, the
+   dashboard equivalent is: service from this repo, root directory `.`,
+   Dockerfile path `control-plane/Dockerfile`, healthcheck `/healthz`, a volume
+   mounted at `/data`, then the variables below.
+2. Secrets — once, never in a file:
+   ```sh
+   railway variables set ANTHROPIC_API_KEY=sk-ant-… \
+                         ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_placeholder \
+                         CONTROL_PLANE_TOKEN=$(openssl rand -hex 32)
+   ```
+   (`ANTHROPIC_WEBHOOK_SIGNING_KEY` must be `whsec_`-prefixed or the service
+   refuses to start; replace the placeholder in step 4.)
+3. Settings → Networking → **Generate Domain**. That is the public HTTPS URL.
+4. Console → Manage → Webhooks → add
+   `https://<domain>/webhooks/managed-agents`, subscribed to
+   `session.status_idled` and `session.budget_reached`. Copy the `whsec_…`
+   shown once into `ANTHROPIC_WEBHOOK_SIGNING_KEY` and redeploy.
+5. `railway logs` — boot shows `registry sync complete`, then run the
+   `POST /sessions` curl above against the public URL and watch for
+   `session idled — awaiting input slug=jarvis …`.
+
+The image runs as root: Railway volumes are root-owned and the platform's own
+fix for non-root images is `RAILWAY_RUN_UID=0`. Volumes are single-replica; do
+not scale this service horizontally (SQLite would not survive it anyway).
+
+## Not in stage 1
+
+Notification delivery (the webhook logs only), `rig-gpu` provisioning and the
+worker, any UI, `mcp-fleet`. Session state is never stored locally — the
+`session_usage` table is a cumulative usage snapshot per session, upserted
+from webhooks, for the Usage tab to aggregate later.

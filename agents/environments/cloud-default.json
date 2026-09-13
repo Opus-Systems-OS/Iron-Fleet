@@ -1,0 +1,10 @@
+{
+  "slug": "cloud-default",
+  "environment": {
+    "name": "cloud-default",
+    "config": {
+      "type": "cloud",
+      "networking": { "type": "unrestricted" }
+    }
+  }
+}

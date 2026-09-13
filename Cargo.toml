@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+# CLAUDE.md lists worker, mcp-fleet and app/src-tauri as members too; they are
+# added when their build stage starts. Stage 1 is control-plane only.
+members = ["control-plane"]
+
+[workspace.package]
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

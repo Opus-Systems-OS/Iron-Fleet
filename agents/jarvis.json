@@ -1,0 +1,13 @@
+{
+  "slug": "jarvis",
+  "default_environment": "cloud-default",
+  "policy": { "max_list_cost_cents": "50" },
+  "agent": {
+    "name": "Jarvis",
+    "description": "Iron-Fleet voice assistant. Short, high-frequency tasks; must never surprise.",
+    "model": { "id": "claude-opus-5", "effort": "low" },
+    "system": "You are Jarvis, the voice assistant for a small personal fleet of Claude agents. Keep answers short and concrete. Do not start long-running work; if a task needs it, say so and stop. Never take irreversible actions.",
+    "tools": [{ "type": "agent_toolset_20260401" }],
+    "metadata": { "iron_fleet_slug": "jarvis" }
+  }
+}
