@@ -5,6 +5,10 @@
 //! numbers. `Cents` is the only type that can occupy those fields, and the only
 //! way to construct one is the validating parser, so no float — and no unchecked
 //! integer — can reach a request body.
+//!
+//! `"0"` is valid: a freshly created session reports `list_cost.amount: "0"`.
+//! A budget cap must be > 0 — that is enforced where caps are defined
+//! (`registry::Policy`), not here.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -22,8 +26,6 @@ pub enum CentsParseError {
     NotDigits(String),
     #[error("amount must not have leading zeros, got {0:?}")]
     LeadingZero(String),
-    #[error("amount must be greater than zero")]
-    Zero,
     #[error("amount is too large")]
     Overflow,
 }
@@ -31,6 +33,10 @@ pub enum CentsParseError {
 impl Cents {
     pub fn get(self) -> u64 {
         self.0
+    }
+
+    pub fn is_zero(self) -> bool {
+        self.0 == 0
     }
 }
 
@@ -44,10 +50,7 @@ impl FromStr for Cents {
         if !s.bytes().all(|b| b.is_ascii_digit()) {
             return Err(CentsParseError::NotDigits(s.to_owned()));
         }
-        if s == "0" {
-            return Err(CentsParseError::Zero);
-        }
-        if s.starts_with('0') {
+        if s != "0" && s.starts_with('0') {
             return Err(CentsParseError::LeadingZero(s.to_owned()));
         }
         s.parse::<u64>()
@@ -84,12 +87,17 @@ mod tests {
         assert_eq!("500".parse::<Cents>().unwrap().get(), 500);
         assert_eq!("1".parse::<Cents>().unwrap().get(), 1);
         assert_eq!("1000".parse::<Cents>().unwrap().get(), 1000);
+        // The API reports "0" on a fresh session; it must parse.
+        assert!("0".parse::<Cents>().unwrap().is_zero());
     }
 
     #[test]
     fn rejects_everything_else() {
         assert_eq!("".parse::<Cents>(), Err(CentsParseError::Empty));
-        assert_eq!("0".parse::<Cents>(), Err(CentsParseError::Zero));
+        assert_eq!(
+            "00".parse::<Cents>(),
+            Err(CentsParseError::LeadingZero("00".into()))
+        );
         assert!(matches!(
             "050".parse::<Cents>(),
             Err(CentsParseError::LeadingZero(_))

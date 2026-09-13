@@ -20,13 +20,26 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self> {
+        // Values are trimmed: a trailing newline from a paste would otherwise
+        // become an invalid HTTP header and surface as an opaque client error.
         let required = |name: &str| -> Result<String> {
-            match env::var(name) {
-                Ok(v) if !v.trim().is_empty() => Ok(v),
-                _ => Err(Error::Config(format!("{name} is not set"))),
+            let v = env::var(name).unwrap_or_default().trim().to_owned();
+            if v.is_empty() {
+                return Err(Error::Config(format!("{name} is not set")));
             }
+            if v.chars().any(|c| c.is_whitespace() || c.is_control()) {
+                return Err(Error::Config(format!(
+                    "{name} contains whitespace or control characters"
+                )));
+            }
+            Ok(v)
         };
-        let optional = |name: &str| env::var(name).ok().filter(|v| !v.trim().is_empty());
+        let optional = |name: &str| {
+            env::var(name)
+                .ok()
+                .map(|v| v.trim().to_owned())
+                .filter(|v| !v.is_empty())
+        };
 
         let webhook_signing_key = required("ANTHROPIC_WEBHOOK_SIGNING_KEY")?;
         if !webhook_signing_key.starts_with("whsec_") {

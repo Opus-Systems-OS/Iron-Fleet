@@ -1,0 +1,76 @@
+{
+  "agent": {
+    "description": "Iron-Fleet voice assistant. Short, high-frequency tasks; must never surprise.",
+    "id": "agent_01EXAMPLEEXAMPLEEXAMPLE",
+    "mcp_servers": [],
+    "model": {
+      "effort": {
+        "type": "low"
+      },
+      "id": "claude-opus-5",
+      "speed": "standard"
+    },
+    "multiagent": null,
+    "name": "Jarvis",
+    "skills": [],
+    "system": "You are Jarvis, the voice assistant for a small personal fleet of Claude agents. Keep answers short and concrete. Do not start long-running work; if a task needs it, say so and stop. Never take irreversible actions.",
+    "tools": [
+      {
+        "configs": [],
+        "default_config": {
+          "enabled": true,
+          "permission_policy": {
+            "type": "always_allow"
+          }
+        },
+        "type": "agent_toolset_20260401"
+      }
+    ],
+    "type": "agent",
+    "version": 1
+  },
+  "archived_at": null,
+  "budget": {
+    "max_list_cost": {
+      "amount": "50",
+      "currency": "USD"
+    },
+    "type": "limit"
+  },
+  "created_at": "2026-09-13T18:14:20.657812Z",
+  "environment_id": "env_01EXAMPLEEXAMPLEEXAMPLEXX",
+  "id": "sesn_01EXAMPLEEXAMPLEEXAMPLEX",
+  "metadata": {
+    "iron_fleet_agent": "jarvis",
+    "iron_fleet_environment": "cloud-default"
+  },
+  "outcome_evaluations": [],
+  "resources": [],
+  "stats": {
+    "active_seconds": 1.317,
+    "duration_seconds": 206.932533178
+  },
+  "status": "idle",
+  "title": "Say hello and stop.",
+  "type": "session",
+  "updated_at": "2026-09-13T18:14:22.623080Z",
+  "usage": {
+    "active_seconds": 1.604,
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 7124
+    },
+    "cache_read_input_tokens": 0,
+    "input_tokens": 2,
+    "list_cost": {
+      "amount": "5",
+      "currency": "USD"
+    },
+    "output_tokens": 19,
+    "server_tool_use": {
+      "web_fetch_requests": 0,
+      "web_search_requests": 0
+    }
+  },
+  "vault_ids": []
+}

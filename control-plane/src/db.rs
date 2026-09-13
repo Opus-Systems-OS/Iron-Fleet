@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS session_usage (
   list_cost_cents   TEXT,
   input_tokens      INTEGER,
   output_tokens     INTEGER,
-  active_seconds    INTEGER,
+  active_seconds    REAL,
   budget_reached    INTEGER NOT NULL DEFAULT 0,
   last_event_type   TEXT,
   observed_at       TEXT NOT NULL
@@ -72,7 +72,7 @@ pub struct UsageSnapshot {
     pub list_cost_cents: Option<Cents>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
-    pub active_seconds: Option<u64>,
+    pub active_seconds: Option<f64>,
     pub budget_reached: bool,
     pub last_event_type: String,
 }
@@ -228,7 +228,7 @@ impl Db {
                     s.list_cost_cents.map(|c| c.to_string()),
                     s.input_tokens.map(|v| v as i64),
                     s.output_tokens.map(|v| v as i64),
-                    s.active_seconds.map(|v| v as i64),
+                    s.active_seconds,
                     s.budget_reached as i64,
                     s.last_event_type,
                     now(),
@@ -321,7 +321,7 @@ mod tests {
             list_cost_cents: Some("53".parse().unwrap()),
             input_tokens: Some(10),
             output_tokens: Some(20),
-            active_seconds: Some(4),
+            active_seconds: Some(4.5),
             budget_reached: reached,
             last_event_type: event.into(),
         };

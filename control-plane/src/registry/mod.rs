@@ -82,6 +82,12 @@ pub fn load_dir(dir: &Path) -> Result<Registry> {
     for path in json_files(dir)? {
         let mut file: AgentFile = read_json(&path)?;
         check_slug_matches_filename(&path, &file.slug)?;
+        if file.policy.max_list_cost_cents.is_zero() {
+            return Err(Error::Registry {
+                path,
+                reason: "policy.max_list_cost_cents must be greater than zero".into(),
+            });
+        }
         if !reg.environments.contains_key(&file.default_environment) {
             return Err(Error::Registry {
                 path,
@@ -192,6 +198,27 @@ mod tests {
             reg.agents["jarvis"].agent.metadata[SLUG_METADATA_KEY],
             "jarvis"
         );
+    }
+
+    #[test]
+    fn zero_budget_is_a_load_error() {
+        let dir = std::env::temp_dir().join(format!("iron-fleet-zero-cap-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("environments")).unwrap();
+        std::fs::copy(
+            repo_agents_dir().join("environments/cloud-default.json"),
+            dir.join("environments/cloud-default.json"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("zero.json"),
+            r#"{"slug":"zero","default_environment":"cloud-default",
+                "policy":{"max_list_cost_cents":"0"},
+                "agent":{"name":"z","model":{"id":"claude-opus-5"}}}"#,
+        )
+        .unwrap();
+        let err = load_dir(&dir).unwrap_err().to_string();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.contains("greater than zero"), "{err}");
     }
 
     #[test]

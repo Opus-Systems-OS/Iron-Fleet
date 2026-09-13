@@ -192,8 +192,9 @@ pub struct Usage {
     pub input_tokens: Option<u64>,
     #[serde(default)]
     pub output_tokens: Option<u64>,
+    /// Fractional seconds on the wire (e.g. `1.604`).
     #[serde(default)]
-    pub active_seconds: Option<u64>,
+    pub active_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -268,6 +269,25 @@ mod tests {
         );
         assert_eq!(s.budget.unwrap().max_list_cost.amount.get(), 50);
         assert_eq!(s.status, "idle");
+    }
+
+    #[test]
+    fn real_session_response_deserializes() {
+        // Captured from GET /v1/sessions/{id} on 2026-09-13; fresh sessions
+        // report list_cost "0" and active_seconds is fractional.
+        let raw = include_str!("fixtures/session_idle.json");
+        let s: Session = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.status, "idle");
+        assert_eq!(s.metadata["iron_fleet_agent"], "jarvis");
+        let u = s.usage.unwrap();
+        assert_eq!(u.list_cost.unwrap().amount.get(), 5);
+        assert_eq!(u.active_seconds, Some(1.604));
+        assert_eq!(s.budget.unwrap().max_list_cost.amount.get(), 50);
+
+        let mut fresh: serde_json::Value = serde_json::from_str(raw).unwrap();
+        fresh["usage"]["list_cost"]["amount"] = serde_json::json!("0");
+        let s: Session = serde_json::from_value(fresh).unwrap();
+        assert!(s.usage.unwrap().list_cost.unwrap().amount.is_zero());
     }
 
     #[test]
