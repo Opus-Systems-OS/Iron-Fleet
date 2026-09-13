@@ -6,3 +6,6 @@
 .env
 .env.*
 .DS_Store
+
+# Railway IaC authoring package (installed in .railway/, not the Rust workspace)
+.railway/node_modules

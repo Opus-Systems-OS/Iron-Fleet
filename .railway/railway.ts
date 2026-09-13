@@ -1,49 +1,45 @@
 // Railway Infrastructure as Code for the Iron-Fleet control plane.
+// Imported from the live project with `railway config pull`, then cleaned:
+// no commit pin (track main), non-secret values inline, secrets preserved.
 //
-// Railway's IaC (`.railway/railway.ts`) is in beta and replaces the deprecated
-// railway.toml/railway.json (hard cutoff 2026-12-01). The stable contract this
-// file expresses — and what to click in the dashboard if `railway apply` ever
-// disagrees with the beta reference — is:
+// Secrets are set once, out of band, and never written here:
+//   railway variable set ANTHROPIC_API_KEY=sk-ant-... \
+//                        ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_... \
+//                        CONTROL_PLANE_TOKEN=$(openssl rand -hex 32)
 //
-//   service "control-plane"
-//     source:     this GitHub repo, root directory = repo root
-//     build:      Dockerfile at control-plane/Dockerfile, context = repo root
-//     healthcheck /healthz
-//     volume      mounted at /data  (SQLite: registry, policy, usage rollups)
-//     variables   DATABASE_PATH=/data/control-plane.db plus the three secrets
-//     domain      "Generate Domain" → the public HTTPS URL for the webhook
-//
-// Secrets are never written here. Set them once:
-//   railway variables set ANTHROPIC_API_KEY=sk-ant-... \
-//                         ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_... \
-//                         CONTROL_PLANE_TOKEN=$(openssl rand -hex 32)
-// `preserve()` keeps whatever Railway already holds for those keys.
+// Review changes with `railway config plan` before `railway config apply`.
 
-import { defineRailway, github, service, volume, preserve, project } from "railway/iac";
+import { defineRailway, github, preserve, project, service, volume } from "railway/iac";
 
 export default defineRailway(() => {
-  const data = volume("control-plane-data", { sizeMB: 512 });
+  // SQLite: agent registry, budget policy, usage rollups. Single replica only.
+  const data = volume("iron-fleet-volume", {
+    region: "sfo",
+    sizeMB: 500,
+    allowOnlineResize: true,
+    alerts: { usage: { "80": {}, "95": {}, "100": {} } },
+  });
 
-  const controlPlane = service("control-plane", {
-    source: github("Opus1247/Iron-Fleet", { rootDirectory: "." }),
-    build: "docker build -f control-plane/Dockerfile .",
-    start: "control-plane serve",
+  const controlPlane = service("Iron-Fleet", {
+    source: github("Opus1247/Iron-Fleet", { upstreamUrl: "https://github.com/Opus1247/Iron-Fleet" }),
+    // Build context is the repo root: the workspace Cargo.toml and agents/ are needed.
+    build: { builder: "DOCKERFILE", dockerfilePath: "control-plane/Dockerfile", buildEnvironment: "V3" },
     healthcheck: "/healthz",
+    healthcheckTimeout: 120,
+    replicas: { sfo: 1 },
+    networking: { privateNetworkEndpoint: "iron-fleet" },
     volumeMounts: { "/data": data },
     env: {
       DATABASE_PATH: "/data/control-plane.db",
-      AGENTS_DIR: "/app/agents",
-      RUST_LOG: "info,tower_http=info",
       SYNC_ON_BOOT: "true",
-      // Only needed if the API key is not in the org's Default workspace; it
-      // is used solely to build the Console trace URL in POST /sessions responses.
+      RUST_LOG: "info,tower_http=info",
+      // Only used to build the Console trace URL in POST /sessions responses.
       ANTHROPIC_WORKSPACE: "default",
-      // Secrets — set out of band, never committed.
       ANTHROPIC_API_KEY: preserve(),
       ANTHROPIC_WEBHOOK_SIGNING_KEY: preserve(),
       CONTROL_PLANE_TOKEN: preserve(),
     },
   });
 
-  return project("iron-fleet", { resources: [controlPlane, data] });
+  return project("practical-compassion", { resources: [controlPlane, data] });
 });

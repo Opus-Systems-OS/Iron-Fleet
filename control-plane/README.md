@@ -100,28 +100,36 @@ the whole loop with no spend: `ANTHROPIC_BASE_URL=http://127.0.0.1:9999`.
 
 ## Railway deployment
 
-1. `railway login && railway init` in the repo root (or link an existing
-   project). `.railway/railway.ts` describes the service; `railway plan` /
-   `railway apply` create it. If the IaC beta disagrees with that file, the
-   dashboard equivalent is: service from this repo, root directory `.`,
-   Dockerfile path `control-plane/Dockerfile`, healthcheck `/healthz`, a volume
-   mounted at `/data`, then the variables below.
-2. Secrets — once, never in a file:
-   ```sh
-   railway variables set ANTHROPIC_API_KEY=sk-ant-… \
-                         ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_placeholder \
-                         CONTROL_PLANE_TOKEN=$(openssl rand -hex 32)
-   ```
-   (`ANTHROPIC_WEBHOOK_SIGNING_KEY` must be `whsec_`-prefixed or the service
-   refuses to start; replace the placeholder in step 4.)
-3. Settings → Networking → **Generate Domain**. That is the public HTTPS URL.
-4. Console → Manage → Webhooks → add
-   `https://<domain>/webhooks/managed-agents`, subscribed to
-   `session.status_idled` and `session.budget_reached`. Copy the `whsec_…`
-   shown once into `ANTHROPIC_WEBHOOK_SIGNING_KEY` and redeploy.
-5. `railway logs` — boot shows `registry sync complete`, then run the
-   `POST /sessions` curl above against the public URL and watch for
-   `session idled — awaiting input slug=jarvis …`.
+Live at `https://iron-fleet-production.up.railway.app` — project
+`practical-compassion`, service `Iron-Fleet`, environment `production`,
+connected to this GitHub repo so a push to `main` deploys.
+
+`.railway/railway.ts` is the project's Infrastructure-as-Code file, imported
+from the live project with `railway config pull` and cleaned. `railway config
+plan` should report no changes; review any diff before `railway config apply`.
+It needs the authoring package: `cd .railway && npm install railway`
+(`node_modules` is gitignored there).
+
+What the service config amounts to, if it ever has to be recreated by hand:
+
+```sh
+railway link --project practical-compassion --environment production --service Iron-Fleet
+railway environment edit --json <<'JSON'
+{"services":{"<service-id>":{"build":{"builder":"DOCKERFILE","dockerfilePath":"control-plane/Dockerfile"},
+  "deploy":{"healthcheckPath":"/healthz","healthcheckTimeout":120}}}}
+JSON
+railway volume add -m /data
+railway variable set DATABASE_PATH=/data/control-plane.db SYNC_ON_BOOT=true RUST_LOG=info,tower_http=info --skip-deploys
+railway variable set ANTHROPIC_API_KEY=sk-ant-... ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_... \
+                     CONTROL_PLANE_TOKEN=$(openssl rand -hex 32) --skip-deploys
+railway domain            # public HTTPS URL for the webhook
+railway up --detach       # or push to main
+```
+
+Webhook registration is Console-only: **Manage → Webhooks** → add
+`https://<domain>/webhooks/managed-agents`, subscribed to
+`session.status_idled` and `session.budget_reached`. Copy the `whsec_…` shown
+once into `ANTHROPIC_WEBHOOK_SIGNING_KEY`; the variable change redeploys.
 
 The image runs as root: Railway volumes are root-owned and the platform's own
 fix for non-root images is `RAILWAY_RUN_UID=0`. Volumes are single-replica; do
