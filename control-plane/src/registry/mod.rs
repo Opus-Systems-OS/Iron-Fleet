@@ -3,6 +3,7 @@
 //! ```text
 //! agents/<slug>.json                 -> AgentFile
 //! agents/environments/<slug>.json    -> EnvironmentFile
+//! agents/skills/<name>/SKILL.md ...  -> SkillDir (a custom skill, uploaded whole)
 //! ```
 
 pub mod sync;
@@ -11,6 +12,8 @@ use crate::anthropic::types::{AgentDefinition, EnvironmentDefinition};
 use crate::error::{Error, Result};
 use crate::money::Cents;
 use serde::Deserialize;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -55,13 +58,36 @@ impl EnvironmentFile {
     }
 }
 
+/// One custom skill: the directory `agents/skills/<name>/`, read whole. Uploaded
+/// to the Skills API as a full snapshot (a version is never a delta), so this
+/// holds every file's bytes and a hash over all of them.
+#[derive(Debug, Clone)]
+pub struct SkillDir {
+    /// Directory name == `SKILL.md` frontmatter `name` (Anthropic makes the
+    /// latter immutable from the first upload, so the two must agree up front).
+    pub name: String,
+    /// `(path relative to the skill dir, bytes)`, sorted by path.
+    pub files: Vec<(String, Vec<u8>)>,
+    /// SHA-256 over every `(path, bytes)` pair; any byte change is a new version.
+    pub sha256: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Registry {
     pub agents: BTreeMap<String, AgentFile>,
     pub environments: BTreeMap<String, EnvironmentFile>,
+    pub skills: BTreeMap<String, SkillDir>,
 }
 
 pub const SLUG_METADATA_KEY: &str = "iron_fleet_slug";
+
+/// The one field in an agent's "verbatim `POST /v1/agents` body" that is not
+/// on the wire: `{"type": "custom", "skill": "<dir name>"}` names a directory
+/// under `agents/skills/`, and sync rewrites it to the real `skill_id` +
+/// `version` once that skill is uploaded (`sync::resolve_skills`). Entries that
+/// already carry a `skill_id` (Anthropic's `xlsx` etc., or a literal id) pass
+/// through untouched.
+pub const SKILL_REF_KEY: &str = "skill";
 
 pub fn load_dir(dir: &Path) -> Result<Registry> {
     let mut reg = Registry::default();
@@ -79,9 +105,27 @@ pub fn load_dir(dir: &Path) -> Result<Registry> {
         }
     }
 
+    let skills_dir = dir.join("skills");
+    if skills_dir.is_dir() {
+        for path in skill_dirs(&skills_dir)? {
+            let skill = load_skill_dir(&path)?;
+            reg.skills.insert(skill.name.clone(), skill);
+        }
+    }
+
     for path in json_files(dir)? {
         let mut file: AgentFile = read_json(&path)?;
         check_slug_matches_filename(&path, &file.slug)?;
+        for entry in &file.agent.skills {
+            if let Some(name) = repo_skill_ref(entry) {
+                if !reg.skills.contains_key(name) {
+                    return Err(Error::Registry {
+                        path,
+                        reason: format!("skill `{name}` has no directory in skills/"),
+                    });
+                }
+            }
+        }
         if file.policy.max_list_cost_cents.is_zero() {
             return Err(Error::Registry {
                 path,
@@ -131,6 +175,130 @@ fn json_files(dir: &Path) -> Result<Vec<PathBuf>> {
         .collect();
     out.sort();
     Ok(out)
+}
+
+/// `skills/<name>/` directories, sorted. Non-directories are ignored so a
+/// stray `.DS_Store` cannot break the fleet.
+fn skill_dirs(dir: &Path) -> Result<Vec<PathBuf>> {
+    let entries = std::fs::read_dir(dir).map_err(|e| Error::Registry {
+        path: dir.to_path_buf(),
+        reason: e.to_string(),
+    })?;
+    let mut out: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_dir())
+        .collect();
+    out.sort();
+    Ok(out)
+}
+
+/// If `entry` is `{"type": "custom", "skill": "<name>"}`, the name.
+pub fn repo_skill_ref(entry: &Value) -> Option<&str> {
+    if entry.get("type").and_then(Value::as_str) != Some("custom") {
+        return None;
+    }
+    entry.get(SKILL_REF_KEY).and_then(Value::as_str)
+}
+
+pub fn load_skill_dir(root: &Path) -> Result<SkillDir> {
+    let name = root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_owned();
+    check_slug_matches_filename(root, &name)?;
+
+    let mut files = Vec::new();
+    collect_files(root, root, &mut files)?;
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let skill_md = files
+        .iter()
+        .find(|(p, _)| p == "SKILL.md")
+        .ok_or_else(|| Error::Registry {
+            path: root.to_path_buf(),
+            reason: "skill directory has no SKILL.md".into(),
+        })?;
+    let frontmatter_name = frontmatter_name(&skill_md.1).ok_or_else(|| Error::Registry {
+        path: root.join("SKILL.md"),
+        reason: "SKILL.md frontmatter has no `name:`".into(),
+    })?;
+    if frontmatter_name != name {
+        return Err(Error::Registry {
+            path: root.join("SKILL.md"),
+            reason: format!(
+                "frontmatter name `{frontmatter_name}` does not match directory `{name}`"
+            ),
+        });
+    }
+
+    let mut hasher = Sha256::new();
+    for (path, bytes) in &files {
+        hasher.update(path.as_bytes());
+        hasher.update([0]);
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(bytes);
+    }
+    Ok(SkillDir {
+        name,
+        files,
+        sha256: hex::encode(hasher.finalize()),
+    })
+}
+
+fn collect_files(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) -> Result<()> {
+    let io = |e: std::io::Error| Error::Registry {
+        path: dir.to_path_buf(),
+        reason: e.to_string(),
+    };
+    for entry in std::fs::read_dir(dir).map_err(io)? {
+        let path = entry.map_err(io)?.path();
+        let file_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if matches!(file_name, ".DS_Store" | "node_modules" | ".git") {
+            continue;
+        }
+        if path.is_dir() {
+            collect_files(root, &path, out)?;
+        } else if path.is_file() {
+            let rel = path
+                .strip_prefix(root)
+                .expect("path is under root")
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            let bytes = std::fs::read(&path).map_err(|e| Error::Registry {
+                path: path.clone(),
+                reason: e.to_string(),
+            })?;
+            out.push((rel, bytes));
+        }
+    }
+    Ok(())
+}
+
+/// `name:` from the YAML frontmatter (`---` … `---`) at the top of SKILL.md.
+/// Deliberately minimal: the frontmatter is two required scalar keys, not a
+/// YAML document worth a dependency.
+fn frontmatter_name(skill_md: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(skill_md).ok()?;
+    let mut lines = text.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    for line in lines {
+        if line.trim() == "---" {
+            break;
+        }
+        if let Some(rest) = line.strip_prefix("name:") {
+            let v = rest.trim().trim_matches('"').trim_matches('\'');
+            if !v.is_empty() {
+                return Some(v.to_owned());
+            }
+        }
+    }
+    None
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
@@ -293,6 +461,107 @@ mod tests {
         let err = load_dir(&dir).unwrap_err().to_string();
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(err.contains("greater than zero"), "{err}");
+    }
+
+    #[test]
+    fn committed_skill_loads_and_blueweb_client_references_it() {
+        unsafe {
+            std::env::set_var("MCP_FLEET_URL", "https://mcp-fleet.internal.example/mcp");
+        }
+        let reg = load_dir(&repo_agents_dir()).unwrap();
+        let skill = &reg.skills["blueweb-customer-site"];
+        assert!(skill.files.iter().any(|(p, _)| p == "SKILL.md"));
+        assert!(skill.files.iter().any(|(p, _)| p == "scripts/new-site.sh"));
+        assert!(
+            skill.files.iter().all(|(p, _)| !p.contains(".DS_Store")),
+            "Finder litter must not be uploaded"
+        );
+        // The skill is mounted somewhere under the sandbox, never at the
+        // author's ~/.claude path — nothing in it may assume that path.
+        for (p, bytes) in &skill.files {
+            assert!(
+                !String::from_utf8_lossy(bytes).contains(".claude/skills"),
+                "{p} hardcodes a local skills path"
+            );
+        }
+        let refs: Vec<&str> = reg.agents["blueweb-client"]
+            .agent
+            .skills
+            .iter()
+            .filter_map(repo_skill_ref)
+            .collect();
+        assert_eq!(refs, ["blueweb-customer-site"]);
+    }
+
+    fn scratch_skill(tag: &str, dir_name: &str, skill_md: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("iron-fleet-skill-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let skill = root.join(dir_name);
+        std::fs::create_dir_all(skill.join("scripts")).unwrap();
+        std::fs::write(skill.join("SKILL.md"), skill_md).unwrap();
+        std::fs::write(skill.join("scripts/run.sh"), "#!/bin/sh\n").unwrap();
+        std::fs::write(skill.join(".DS_Store"), "junk").unwrap();
+        skill
+    }
+
+    #[test]
+    fn skill_dir_hash_tracks_content_and_paths_are_relative() {
+        let md = "---\nname: demo-skill\ndescription: d\n---\nbody\n";
+        let skill = scratch_skill("hash", "demo-skill", md);
+        let a = load_skill_dir(&skill).unwrap();
+        assert_eq!(a.name, "demo-skill");
+        let paths: Vec<&str> = a.files.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(paths, ["SKILL.md", "scripts/run.sh"]);
+
+        let b = load_skill_dir(&skill).unwrap();
+        assert_eq!(a.sha256, b.sha256, "hash is stable across loads");
+
+        std::fs::write(skill.join("scripts/run.sh"), "#!/bin/sh\necho hi\n").unwrap();
+        let c = load_skill_dir(&skill).unwrap();
+        assert_ne!(
+            a.sha256, c.sha256,
+            "a byte change anywhere is a new version"
+        );
+        std::fs::remove_dir_all(skill.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn skill_dir_name_must_match_frontmatter_and_have_skill_md() {
+        let skill = scratch_skill(
+            "mismatch",
+            "demo-skill",
+            "---\nname: other-name\ndescription: d\n---\n",
+        );
+        let err = load_skill_dir(&skill).unwrap_err().to_string();
+        assert!(err.contains("does not match directory"), "{err}");
+
+        std::fs::remove_file(skill.join("SKILL.md")).unwrap();
+        let err = load_skill_dir(&skill).unwrap_err().to_string();
+        assert!(err.contains("no SKILL.md"), "{err}");
+        std::fs::remove_dir_all(skill.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn unknown_skill_reference_is_a_load_error() {
+        let dir = std::env::temp_dir().join(format!("iron-fleet-no-skill-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("environments")).unwrap();
+        std::fs::copy(
+            repo_agents_dir().join("environments/cloud-default.json"),
+            dir.join("environments/cloud-default.json"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("x.json"),
+            r#"{"slug":"x","default_environment":"cloud-default",
+                "policy":{"max_list_cost_cents":"5"},
+                "agent":{"name":"x","model":{"id":"claude-opus-5"},
+                         "skills":[{"type":"custom","skill":"nope"}]}}"#,
+        )
+        .unwrap();
+        let err = load_dir(&dir).unwrap_err().to_string();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.contains("skill `nope` has no directory"), "{err}");
     }
 
     #[test]

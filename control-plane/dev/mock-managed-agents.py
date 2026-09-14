@@ -12,10 +12,14 @@ Nothing here is a substitute for the real API; it only checks the wire shape.
 import json
 import sys
 import uuid
+from email.parser import BytesParser
+from email.policy import HTTP
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 REQUIRED = {"x-api-key": None, "anthropic-version": "2023-06-01", "anthropic-beta": "managed-agents-2026-04-01"}
-STATE = {"agents": {}, "environments": {}, "sessions": {}, "vaults": {}, "credentials": {}}
+# The Skills API is GA: same key/version, multipart body, and no beta header.
+SKILLS_REQUIRED = {"x-api-key": None, "anthropic-version": "2023-06-01"}
+STATE = {"agents": {}, "environments": {}, "sessions": {}, "vaults": {}, "credentials": {}, "skills": {}}
 
 # What docs.claude.com/managed-agents/mcp-connector documents as the only
 # accepted mcp_servers entry fields — this is what caught the real
@@ -25,8 +29,8 @@ STATIC_BEARER_AUTH_FIELDS = {"type", "mcp_server_url", "token"}
 
 
 class H(BaseHTTPRequestHandler):
-    def _check_headers(self):
-        for k, want in REQUIRED.items():
+    def _check_headers(self, required=REQUIRED):
+        for k, want in required.items():
             got = self.headers.get(k)
             if got is None or (want is not None and got != want):
                 self._json(400, {"type": "error", "error": {"type": "invalid_request_error",
@@ -50,13 +54,63 @@ class H(BaseHTTPRequestHandler):
         print(f"--> {self.command} {self.path}\n{json.dumps(obj, indent=2)}", flush=True)
         return obj
 
+    def _skill_upload(self):
+        """Parse a multipart `files[]` upload the way the Skills API documents it:
+        every part's filename is `<dir>/<relative path>`, all under one top-level
+        dir, which must contain SKILL.md. Returns (dir_name, error)."""
+        n = int(self.headers.get("content-length") or 0)
+        raw = self.rfile.read(n) if n else b""
+        ctype = self.headers.get("content-type", "")
+        if not ctype.startswith("multipart/form-data"):
+            return None, f"expected multipart/form-data, got {ctype!r}"
+        msg = BytesParser(policy=HTTP).parsebytes(b"content-type: " + ctype.encode() + b"\r\n\r\n" + raw)
+        names = []
+        for part in msg.iter_parts():
+            if part.get_param("name", header="content-disposition") != "files[]":
+                return None, "every part must be a files[] entry"
+            fn = part.get_filename()
+            if not fn or "/" not in fn:
+                return None, f"part filename must be <dir>/<path>, got {fn!r} (percent-encoded slash?)"
+            names.append(fn)
+        print(f"--> {self.command} {self.path}\n  files[]: {names}", flush=True)
+        tops = {fn.split("/", 1)[0] for fn in names}
+        if len(tops) != 1:
+            return None, f"all files must share one top-level directory, got {sorted(tops)}"
+        top = tops.pop()
+        if f"{top}/SKILL.md" not in names:
+            return None, f"{top}/SKILL.md is required"
+        return top, None
+
     def do_POST(self):
+        p = self.path.split("?")[0]
+        if p == "/v1/skills" or (p.startswith("/v1/skills/") and p.endswith("/versions")):
+            if not self._check_headers(SKILLS_REQUIRED):
+                return
+            top, err = self._skill_upload()
+            if err:
+                return self._json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": err}})
+            if p == "/v1/skills":
+                sid = "skill_mock_" + uuid.uuid4().hex[:10]
+                ver = "skillver_mock_" + uuid.uuid4().hex[:10]
+                STATE["skills"][sid] = {"id": sid, "type": "skill", "display_name": top, "name": top,
+                                        "latest_version_id": ver, "source": {"type": "custom"}}
+                return self._json(200, STATE["skills"][sid])
+            sid = p.split("/")[3]
+            s = STATE["skills"].get(sid)
+            if not s:
+                return self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "no such skill"}})
+            if s["name"] != top:
+                return self._json(400, {"type": "error", "error": {"type": "invalid_request_error",
+                                        "message": f"skill name is immutable: {s['name']!r} != {top!r}"}})
+            ver = "skillver_mock_" + uuid.uuid4().hex[:10]
+            s["latest_version_id"] = ver
+            return self._json(200, {"id": ver, "type": "skill_version", "skill_id": sid, "name": top, "description": ""})
+
         if not self._check_headers():
             return
         body = self._body()
-        p = self.path.split("?")[0]
         if p == "/v1/agents":
-            err = self._validate_mcp_shape(body)
+            err = self._validate_mcp_shape(body) or self._validate_skills_shape(body)
             if err:
                 return self._json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": err}})
             aid = "agent_mock_" + uuid.uuid4().hex[:10]
@@ -144,6 +198,21 @@ class H(BaseHTTPRequestHandler):
             return f"tools references undeclared mcp server(s): {sorted(dangling)}"
         if unreferenced:
             return f"mcp_servers declared but never referenced by a tools[mcp_toolset]: {sorted(unreferenced)}"
+        return None
+
+    def _validate_skills_shape(self, body):
+        """Mirrors platform.claude.com/docs/managed-agents/skills: each entry is
+        {type: anthropic|custom, skill_id, version?}. The registry's
+        {"type":"custom","skill":"<dir>"} form must have been resolved by sync
+        before it gets here — an unresolved one is exactly the bug this catches."""
+        for s in body.get("skills", []):
+            extra = set(s.keys()) - {"type", "skill_id", "version"}
+            if extra:
+                return f"Failed to parse request body: unknown field {sorted(extra)[0]!r} in skills"
+            if s.get("type") not in ("anthropic", "custom") or not s.get("skill_id"):
+                return f"skills entry needs type anthropic|custom and skill_id: {s}"
+            if s["type"] == "custom" and s["skill_id"] not in STATE["skills"]:
+                return f"no such custom skill {s['skill_id']!r}"
         return None
 
     def do_GET(self):

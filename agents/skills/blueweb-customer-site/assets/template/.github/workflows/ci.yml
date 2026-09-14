@@ -1,0 +1,81 @@
+name: CI
+
+# Cloudflare Pages deploys every push to main straight to the customer's live
+# domain, ungated. This workflow is the gate. A broken build on main is a
+# broken shopfront for a business that pays us to be reachable.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so a CVE disclosed against an untouched tree still surfaces on a
+    # site nobody has needed to change in months.
+    - cron: "23 15 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # ci, not install: installs exactly the lockfile rather than silently
+      # resolving something newer than what was reviewed.
+      - run: npm ci
+
+      - run: npm run build
+
+      # A contact form that silently stops reaching the Function is invisible
+      # in production — the page still looks right and the leads just stop.
+      - name: Contact form survived the build
+        run: |
+          if node -e "import('./src/data/business.js').then(m => process.exit(m.business.email ? 0 : 1))"; then
+            grep -q 'action="/api/contact"' dist/index.html \
+              || { echo "::error::business.email is set but dist/index.html has no form posting to /api/contact"; exit 1; }
+            grep -q 'name="hp_website"' dist/index.html \
+              || { echo "::error::honeypot field missing from the built form — functions/api/contact.js expects it"; exit 1; }
+            test -f functions/api/contact.js \
+              || { echo "::error::the form posts to /api/contact but functions/api/contact.js does not exist"; exit 1; }
+            echo "Contact form and its endpoint are both present."
+          else
+            echo "business.email is null — no contact form expected on this site."
+          fi
+
+      # _headers is only honoured if it reaches the root of the build output.
+      # Astro copies public/ verbatim, so this is really asserting nobody
+      # moved or renamed it.
+      - name: Security headers shipped
+        run: |
+          test -f dist/_headers \
+            || { echo "::error::dist/_headers missing — the site would deploy with no CSP or HSTS"; exit 1; }
+
+      # The customer is promised they can leave at any time and take the site
+      # with them. OFFLOAD.md is how that promise is actually kept — it is the
+      # instructions, in their repo, written for a world with no BlueWeb in
+      # it. Deleting it is a silent broken promise, so it is a build failure.
+      - name: The offload document is still here
+        run: |
+          test -s OFFLOAD.md \
+            || { echo "::error::OFFLOAD.md is missing or empty — the customer's exit path is undocumented"; exit 1; }
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # High and above fails. Lower severities are reported but do not block a
+      # brochure site whose only runtime dependency is a static build.
+      - run: npm audit --audit-level=high

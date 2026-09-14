@@ -82,6 +82,38 @@ agent whose environment has not been provisioned yet (i.e. the very first
 sync since the environment file was added) returns
 `409 environment_not_provisioned`.
 
+### Custom skills: `agents/skills/<name>/`
+
+A directory here is a custom skill — `SKILL.md` plus whatever scripts,
+references and templates it ships — uploaded whole to the Skills API
+(`POST /v1/skills`, GA, multipart, no beta header). The directory name must
+equal the `name:` in `SKILL.md`'s frontmatter, because Anthropic makes that
+slug immutable from the first upload. Sync reconciles skills before agents:
+unknown → created, content hash changed → a new version (a full snapshot,
+never a delta), unchanged → untouched; ids land in the `skills` table.
+
+An agent attaches one with the registry's reference form, resolved at sync:
+
+```jsonc
+"skills": [{ "type": "custom", "skill": "blueweb-customer-site" }]
+//  -> on the wire: { "type": "custom", "skill_id": "skill_…", "version": "<version id>" }
+```
+
+This is the one field in the otherwise-verbatim `agent` body that is not on
+the wire (alongside `${VAR}` substitution). It pins the *version id*, not
+`"latest"`, so a skill edit changes the agent's definition hash and rolls a
+new agent version — sessions pinned to an agent version get the matching
+skill snapshot. Pre-built Anthropic skills (`{"type":"anthropic","skill_id":"xlsx"}`)
+and literal `skill_id` entries pass through untouched. Skills need the agent's
+`read` tool (`agent_toolset_20260401` includes it). Nothing in a skill may
+assume the author's `~/.claude/skills` path — it is mounted elsewhere in the
+sandbox; the registry test checks for that string.
+
+The skill's own instructions may need credentials the sandbox doesn't have
+(`blueweb-customer-site` wants `gh` and `wrangler` logins). Those are a
+session-time vault concern, like `mcp-fleet`'s bearer token, not something
+the registry provisions.
+
 Provisioning a `self_hosted` environment (`rig-gpu`) returns an
 `environment_key` that the rig, not the control plane, needs — the rig owns
 its key (CLAUDE.md). Sync surfaces it exactly once via `eprintln!` (never

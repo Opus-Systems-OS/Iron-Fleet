@@ -1,0 +1,23 @@
+---
+/**
+ * Services grid. `price` is optional per service — an owner who does not want
+ * prices online gets a card with no price line rather than "Call for pricing",
+ * which reads as something to hide.
+ */
+import { business } from '../data/business.js';
+---
+
+<section id="services" class="section-soft">
+  <div class="wrap">
+    <h2>What we do</h2>
+    <div class="grid">
+      {business.services.map((s) => (
+        <article class="card">
+          <h3>{s.name}</h3>
+          <p>{s.body}</p>
+          {s.price && <span class="price">{s.price}</span>}
+        </article>
+      ))}
+    </div>
+  </div>
+</section>

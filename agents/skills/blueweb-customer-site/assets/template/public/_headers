@@ -1,0 +1,60 @@
+# Cloudflare Pages reads this file from the root of the build output. Astro
+# copies public/ verbatim into dist/, so keeping it here means it ships with
+# every deploy and is reviewable in a PR — unlike headers configured in the
+# Cloudflare dashboard, which nobody remembers exist.
+#
+# Rules are matched most-specific-first; /* is the catch-all.
+
+/*
+  # --- transport -----------------------------------------------------------
+  # One year, subdomains included. Add "; preload" and submit to
+  # hstspreload.org only after the customer's domain has been live and stable
+  # for a few weeks — getting off the preload list takes months, and a local
+  # business that later moves their store to a subdomain would be stuck.
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+  # --- content injection ---------------------------------------------------
+  # script-src is 'self' with no 'unsafe-inline' and no hash list, so it needs
+  # no maintenance as the site's content changes.
+  #
+  # The site does contain one inline <script>: the LocalBusiness JSON-LD in
+  # Base.astro. It does not need a hash here. Browsers do not apply script-src
+  # to `type="application/ld+json"` — it is data, never executed — and this was
+  # verified against Chrome with CSP violation reporting on 2026-09-10: a page
+  # whose only inline script was JSON-LD reported zero violations under a
+  # deliberately wrong hash, while an executable inline script on the same page
+  # under the same policy was blocked and reported. Do not add a hash back; it
+  # would have to be regenerated on every hours or phone-number change.
+  #
+  # style-src keeps 'unsafe-inline' because the pages use style="" attributes,
+  # which cannot be hashed. style-src-elem drops it, so an injected <style>
+  # block is still refused — that is why astro.config.mjs sets
+  # inlineStylesheets: 'never'.
+  #
+  # The fonts.googleapis.com / fonts.gstatic.com allowances are here in
+  # advance: the template ships a system font stack, and a customer who wants
+  # a brand font should not need a CSP edit to get one.
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; worker-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; style-src-elem 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; upgrade-insecure-requests
+
+  # --- clickjacking / sniffing / referrer ----------------------------------
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+  # --- cross-origin isolation ----------------------------------------------
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+
+  # --- capabilities --------------------------------------------------------
+  # A brochure site needs none of these. Denying them shrinks what injected
+  # script could reach for if the CSP were ever bypassed.
+  Permissions-Policy: accelerometer=(), autoplay=(), browsing-topics=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), usb=(), xr-spatial-tracking=()
+
+# Astro fingerprints these filenames, so they can be cached forever.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Everything else in public/ is copied verbatim and NOT fingerprinted, so a
+# long cache would strand visitors on a stale logo after a fix.
+/img/*
+  Cache-Control: public, max-age=3600, must-revalidate

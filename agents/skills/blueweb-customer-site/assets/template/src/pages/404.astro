@@ -1,0 +1,21 @@
+---
+/**
+ * Cloudflare Pages serves dist/404.html for unmatched routes automatically —
+ * no redirect rule needed.
+ */
+import Base from '../layouts/Base.astro';
+import { business } from '../data/business.js';
+---
+
+<Base title="Page not found" indexable={false}>
+  <section class="hero">
+    <div class="wrap">
+      <h1>That page moved.</h1>
+      <p class="lede">The link you followed does not point anywhere on this site any more.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/">Go to the homepage</a>
+        <a class="btn btn-ghost" href={business.phoneHref}>Call {business.phone}</a>
+      </div>
+    </div>
+  </section>
+</Base>

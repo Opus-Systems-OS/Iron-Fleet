@@ -24,6 +24,15 @@ CREATE TABLE IF NOT EXISTS agents (
   default_environment  TEXT NOT NULL REFERENCES environments(slug),
   synced_at            TEXT NOT NULL
 );
+-- Custom skills uploaded from agents/skills/<name>/, one row per directory.
+-- version_id is what agent definitions pin to (see registry::sync::resolve_skills).
+CREATE TABLE IF NOT EXISTS skills (
+  name            TEXT PRIMARY KEY,
+  anthropic_id    TEXT NOT NULL,
+  version_id      TEXT NOT NULL,
+  content_sha256  TEXT NOT NULL,
+  synced_at       TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS session_usage (
   session_id        TEXT PRIMARY KEY,
   agent_slug        TEXT NOT NULL,
@@ -94,6 +103,14 @@ pub struct AgentUsageRow {
     pub session_count: u64,
     pub total_list_cost_cents: u64,
     pub budget_reached_count: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SkillRow {
+    pub name: String,
+    pub skill_id: String,
+    pub version_id: String,
+    pub content_sha256: String,
 }
 
 #[derive(Debug, Clone)]
@@ -237,6 +254,48 @@ impl Db {
             let mut stmt = c.prepare(&format!("{AGENT_SELECT} ORDER BY slug"))?;
             let rows = stmt.query_map([], read_agent_row)?;
             rows.collect()
+        })
+    }
+
+    // ---- skills
+
+    pub fn upsert_skill(&self, row: &SkillRow) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO skills (name, anthropic_id, version_id, content_sha256, synced_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(name) DO UPDATE SET
+                   anthropic_id = excluded.anthropic_id,
+                   version_id = excluded.version_id,
+                   content_sha256 = excluded.content_sha256,
+                   synced_at = excluded.synced_at",
+                params![
+                    row.name,
+                    row.skill_id,
+                    row.version_id,
+                    row.content_sha256,
+                    now()
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn skill(&self, name: &str) -> Result<Option<SkillRow>> {
+        self.with(|c| {
+            c.query_row(
+                "SELECT name, anthropic_id, version_id, content_sha256 FROM skills WHERE name = ?1",
+                [name],
+                |r| {
+                    Ok(SkillRow {
+                        name: r.get(0)?,
+                        skill_id: r.get(1)?,
+                        version_id: r.get(2)?,
+                        content_sha256: r.get(3)?,
+                    })
+                },
+            )
+            .optional()
         })
     }
 
@@ -520,6 +579,35 @@ mod tests {
             "most recently observed first"
         );
         assert_eq!(recent[0].list_cost_cents.unwrap().get(), 300);
+    }
+
+    #[test]
+    fn skill_round_trips_and_upserts() {
+        let db = Db::in_memory().unwrap();
+        assert!(db.skill("blueweb-customer-site").unwrap().is_none());
+        let row = SkillRow {
+            name: "blueweb-customer-site".into(),
+            skill_id: "skill_1".into(),
+            version_id: "skillver_1".into(),
+            content_sha256: "aa".into(),
+        };
+        db.upsert_skill(&row).unwrap();
+        let got = db.skill("blueweb-customer-site").unwrap().unwrap();
+        assert_eq!(
+            (got.skill_id.as_str(), got.version_id.as_str()),
+            ("skill_1", "skillver_1")
+        );
+        db.upsert_skill(&SkillRow {
+            version_id: "skillver_2".into(),
+            content_sha256: "bb".into(),
+            ..row
+        })
+        .unwrap();
+        let got = db.skill("blueweb-customer-site").unwrap().unwrap();
+        assert_eq!(
+            (got.version_id.as_str(), got.content_sha256.as_str()),
+            ("skillver_2", "bb")
+        );
     }
 
     #[test]

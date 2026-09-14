@@ -1,0 +1,70 @@
+---
+import { business, displayName, builder } from '../data/business.js';
+
+// Keys in business.social are lowercase; these are what a visitor should see.
+const SOCIAL_LABELS = { instagram: 'Instagram', facebook: 'Facebook', yelp: 'Yelp', google: 'Google' };
+
+const socials = Object.entries(business.social || {})
+  .filter(([, url]) => url)
+  .map(([key, url]) => [SOCIAL_LABELS[key] ?? key, url]);
+const { street, city, state, zip } = business.address;
+const mapHref =
+  business.mapUrl ||
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    `${business.name} ${street} ${city} ${state} ${zip}`,
+  )}`;
+---
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <strong>{displayName}</strong>
+        <p>{business.tagline}</p>
+      </div>
+
+      <div>
+        <p>
+          <a href={business.phoneHref}>{business.phone}</a>
+          {business.email && (
+            <>
+              <br />
+              <a href={`mailto:${business.email}`}>{business.email}</a>
+            </>
+          )}
+        </p>
+      </div>
+
+      {business.hasStorefront && (
+        <div>
+          <p>
+            <a href={mapHref} rel="noopener">
+              {street}<br />{city}, {state} {zip}
+            </a>
+          </p>
+        </div>
+      )}
+
+      {socials.length > 0 && (
+        <div>
+          <p>
+            {socials.map(([label, url]) => (
+              <>
+                <a href={url} rel="noopener me">{label}</a><br />
+              </>
+            ))}
+          </p>
+        </div>
+      )}
+    </div>
+
+    {/* No copyright year on purpose. This is a static build: `new Date()`
+        would freeze at whatever year the last deploy happened in, and a site
+        that has not needed a change in 14 months would sit there advertising
+        the wrong year. The notice is just as valid without it. */}
+    <p class="footer-builder">
+      &copy; {business.name}. Site by{' '}
+      <a href={builder.url} rel="noopener">{builder.name}</a>.
+    </p>
+  </div>
+</footer>

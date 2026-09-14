@@ -1,0 +1,23 @@
+---
+/**
+ * Sticky header. Deliberately has no JavaScript and no hamburger menu.
+ *
+ * On a phone the section links collapse away and the phone number stays — a
+ * local business site converts on calls, and a menu that has to be opened
+ * puts a tap between the visitor and the one action that matters. If the site
+ * grows past four or five real pages, revisit this rather than hiding more.
+ */
+import { business, displayName } from '../data/business.js';
+---
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="nav-brand" href="/">{displayName}</a>
+    <nav class="nav-links" aria-label="Main">
+      <a href="/#services">Services</a>
+      <a href="/#hours">Hours</a>
+      {business.email && <a href="/#contact">Contact</a>}
+      <a class="btn btn-primary nav-call" href={business.phoneHref}>Call {business.phone}</a>
+    </nav>
+  </div>
+</header>

@@ -1,0 +1,51 @@
+---
+/**
+ * Hours and address.
+ *
+ * A real <table> rather than a stack of divs: a screen reader announces
+ * "Tuesday, 9am to 6pm" as a row, and the hours are also the single most
+ * copied piece of text on a local business site.
+ *
+ * These same values feed the openingHoursSpecification in the structured
+ * data, which is what Google shows in search — so a wrong entry here is wrong
+ * in two visible places.
+ */
+import { business } from '../data/business.js';
+
+const { street, city, state, zip } = business.address;
+const mapHref =
+  business.mapUrl ||
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    `${business.name} ${street} ${city} ${state} ${zip}`,
+  )}`;
+---
+
+<section id="hours">
+  <div class="wrap grid">
+    <div>
+      <h2>Hours</h2>
+      <table class="hours">
+        <tbody>
+          {business.hours.map((h) => (
+            <tr>
+              <th scope="row">{h.day}</th>
+              <td>{h.closed ? 'Closed' : `${h.open} – ${h.close}`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {business.hoursNote && <p>{business.hoursNote}</p>}
+    </div>
+
+    {business.hasStorefront && (
+      <div>
+        <h2>Find us</h2>
+        <p>
+          {street}<br />
+          {city}, {state} {zip}
+        </p>
+        <p><a class="btn btn-ghost" href={mapHref} rel="noopener">Open in Maps</a></p>
+      </div>
+    )}
+  </div>
+</section>

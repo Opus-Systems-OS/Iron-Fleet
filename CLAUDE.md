@@ -83,7 +83,7 @@ control-plane/   Rust, hosted. Registry, webhooks, budget policy, usage rollups
 app/             Tauri 2. src-tauri/ (Rust) + src/ (frontend)
 worker/          Self-hosted environment worker + CUDA runtime image
 mcp-fleet/       MCP server wrapping the control plane for the jarvis agent
-agents/          Agent and environment definitions as versioned JSON
+agents/          Agent, environment and skill definitions as versioned config
 ```
 
 `agents/` is committed config, not Console clicks. The fleet must be

@@ -1,0 +1,12 @@
+# The site is reachable at both the customer's domain and the Cloudflare
+# *.pages.dev URL, serving identical HTML. The canonical <link> in Base.astro
+# is what resolves that for search engines; Cloudflare's preview-deployment
+# access policy is what keeps branch previews off the public web entirely.
+# See references/deploy-cloudflare.md in the blueweb-customer-site skill.
+#
+# No Sitemap: line. A local business site is a handful of pages all reachable
+# from the nav, so a sitemap adds a dependency (@astrojs/sitemap) and a stale-
+# file failure mode for nothing. Add one if the site ever passes ~10 pages.
+
+User-agent: *
+Allow: /

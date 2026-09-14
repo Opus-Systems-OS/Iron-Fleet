@@ -68,6 +68,30 @@ pub struct Agent {
     pub version: u32,
 }
 
+// ---------------------------------------------------------------- skills
+//
+// The Skills API (`/v1/skills`) is GA — no beta header — and takes multipart
+// uploads rather than JSON, so these are response types only; the request is
+// built from a `registry::SkillDir` in `Client::create_skill*`.
+
+/// `POST /v1/skills` response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Skill {
+    pub id: String,
+    /// What `version: "latest"` resolves to right now; pinned into the agent
+    /// definition instead so a skill change rolls a new agent version.
+    pub latest_version_id: String,
+}
+
+/// `POST /v1/skills/{id}/versions` response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SkillVersion {
+    pub id: String,
+    /// Immutable kebab-case slug from the first upload's frontmatter `name`;
+    /// sync checks it still equals the directory name.
+    pub name: String,
+}
+
 // ---------------------------------------------------------- environments
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
