@@ -10,11 +10,14 @@
 //!   pinned into agent definitions (`resolve_skills`).
 //! - Agents: created if unknown, updated (new version) if the definition hash
 //!   changed, otherwise untouched. Policy columns are refreshed every run.
+//! - Credentials: after agents (the vault row references the agent row) —
+//!   see `registry::credentials`.
 
+use super::credentials::{self, CredentialReport};
 use super::{repo_skill_ref, Registry, SKILL_REF_KEY, SLUG_METADATA_KEY};
 use crate::anthropic::types::AgentDefinition;
 use crate::anthropic::Client;
-use crate::db::{AgentRow, Db, SkillRow};
+use crate::db::{AgentGithubRow, AgentRow, Db, SkillRow};
 use crate::error::{Error, Result};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -29,6 +32,7 @@ pub struct SyncReport {
     pub agents_created: usize,
     pub agents_updated: usize,
     pub agents_unchanged: usize,
+    pub credentials: CredentialReport,
     /// `(slug, environment_id, environment_key)` for each `self_hosted`
     /// environment provisioned *this run*. The caller must print these once
     /// and never pass them to `tracing` (they'd end up in aggregated logs).
@@ -151,7 +155,14 @@ pub async fn sync(reg: &Registry, api: &Client, db: &Db) -> Result<SyncReport> {
             default_environment: file.default_environment.clone(),
             synced_at: String::new(),
         })?;
+        let github = file.github.as_ref().map(|g| AgentGithubRow {
+            token_env: g.token_env.clone(),
+            mounts: g.mount.clone(),
+        });
+        db.set_agent_github(slug, github.as_ref())?;
     }
+
+    report.credentials = credentials::sync(reg, api, db).await?;
 
     tracing::info!(?report, "registry sync complete");
     Ok(report)

@@ -33,6 +33,33 @@ CREATE TABLE IF NOT EXISTS skills (
   content_sha256  TEXT NOT NULL,
   synced_at       TEXT NOT NULL
 );
+-- One vault per agent that declares `credentials` in its registry file;
+-- attached only to that agent's sessions (unlike mcp_fleet_vault, which
+-- rides on every session).
+CREATE TABLE IF NOT EXISTS agent_vaults (
+  slug       TEXT PRIMARY KEY REFERENCES agents(slug),
+  vault_id   TEXT NOT NULL,
+  synced_at  TEXT NOT NULL
+);
+-- The `github` block of agents/<slug>.json, refreshed every sync like the
+-- policy columns: which env var holds the mount token (never the token) and
+-- which repos every session of this agent mounts (JSON array of URLs).
+CREATE TABLE IF NOT EXISTS agent_github (
+  slug        TEXT PRIMARY KEY REFERENCES agents(slug),
+  token_env   TEXT NOT NULL,
+  mounts      TEXT NOT NULL,
+  synced_at   TEXT NOT NULL
+);
+-- config_sha256 covers the secret value and its allowed_hosts, so rotation
+-- is detected without ever storing the secret itself.
+CREATE TABLE IF NOT EXISTS agent_credentials (
+  slug           TEXT NOT NULL,
+  secret_name    TEXT NOT NULL,
+  credential_id  TEXT NOT NULL,
+  config_sha256  TEXT NOT NULL,
+  synced_at      TEXT NOT NULL,
+  PRIMARY KEY (slug, secret_name)
+);
 CREATE TABLE IF NOT EXISTS session_usage (
   session_id        TEXT PRIMARY KEY,
   agent_slug        TEXT NOT NULL,
@@ -111,6 +138,18 @@ pub struct SkillRow {
     pub skill_id: String,
     pub version_id: String,
     pub content_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentGithubRow {
+    pub token_env: String,
+    pub mounts: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentCredentialRow {
+    pub credential_id: String,
+    pub config_sha256: String,
 }
 
 #[derive(Debug, Clone)]
@@ -296,6 +335,118 @@ impl Db {
                 },
             )
             .optional()
+        })
+    }
+
+    // ---- per-agent github access
+
+    pub fn agent_github(&self, slug: &str) -> Result<Option<AgentGithubRow>> {
+        self.with(|c| {
+            c.query_row(
+                "SELECT token_env, mounts FROM agent_github WHERE slug = ?1",
+                [slug],
+                |r| {
+                    let mounts: String = r.get(1)?;
+                    Ok(AgentGithubRow {
+                        token_env: r.get(0)?,
+                        mounts: serde_json::from_str(&mounts).unwrap_or_default(),
+                    })
+                },
+            )
+            .optional()
+        })
+    }
+
+    /// `None` removes the row: an agent whose file dropped its `github` block
+    /// stops mounting anything on the next sync.
+    pub fn set_agent_github(&self, slug: &str, row: Option<&AgentGithubRow>) -> Result<()> {
+        self.with(|c| {
+            match row {
+                Some(row) => {
+                    let mounts =
+                        serde_json::to_string(&row.mounts).expect("Vec<String> serializes");
+                    c.execute(
+                        "INSERT INTO agent_github (slug, token_env, mounts, synced_at)
+                         VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT(slug) DO UPDATE SET
+                           token_env = excluded.token_env,
+                           mounts = excluded.mounts,
+                           synced_at = excluded.synced_at",
+                        params![slug, row.token_env, mounts, now()],
+                    )?;
+                }
+                None => {
+                    c.execute("DELETE FROM agent_github WHERE slug = ?1", [slug])?;
+                }
+            }
+            Ok(())
+        })
+    }
+
+    // ---- per-agent vaults
+
+    pub fn agent_vault(&self, slug: &str) -> Result<Option<String>> {
+        self.with(|c| {
+            c.query_row(
+                "SELECT vault_id FROM agent_vaults WHERE slug = ?1",
+                [slug],
+                |r| r.get(0),
+            )
+            .optional()
+        })
+    }
+
+    pub fn set_agent_vault(&self, slug: &str, vault_id: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO agent_vaults (slug, vault_id, synced_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(slug) DO UPDATE SET
+                   vault_id = excluded.vault_id,
+                   synced_at = excluded.synced_at",
+                params![slug, vault_id, now()],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn agent_credential(
+        &self,
+        slug: &str,
+        secret_name: &str,
+    ) -> Result<Option<AgentCredentialRow>> {
+        self.with(|c| {
+            c.query_row(
+                "SELECT credential_id, config_sha256 FROM agent_credentials
+                 WHERE slug = ?1 AND secret_name = ?2",
+                [slug, secret_name],
+                |r| {
+                    Ok(AgentCredentialRow {
+                        credential_id: r.get(0)?,
+                        config_sha256: r.get(1)?,
+                    })
+                },
+            )
+            .optional()
+        })
+    }
+
+    pub fn upsert_agent_credential(
+        &self,
+        slug: &str,
+        secret_name: &str,
+        row: &AgentCredentialRow,
+    ) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO agent_credentials (slug, secret_name, credential_id, config_sha256, synced_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(slug, secret_name) DO UPDATE SET
+                   credential_id = excluded.credential_id,
+                   config_sha256 = excluded.config_sha256,
+                   synced_at = excluded.synced_at",
+                params![slug, secret_name, row.credential_id, row.config_sha256, now()],
+            )?;
+            Ok(())
         })
     }
 
@@ -608,6 +759,74 @@ mod tests {
             (got.version_id.as_str(), got.content_sha256.as_str()),
             ("skillver_2", "bb")
         );
+    }
+
+    #[test]
+    fn agent_vault_and_credentials_round_trip() {
+        let db = Db::in_memory().unwrap();
+        // agent_vaults references agents(slug); seed the agent first.
+        db.upsert_environment("cloud-default", "cloud", Some("env_1"))
+            .unwrap();
+        db.upsert_agent(&AgentRow {
+            slug: "blueweb-client".into(),
+            agent_id: "agent_1".into(),
+            agent_version: 1,
+            definition_sha256: "x".into(),
+            max_list_cost_cents: "1000".parse().unwrap(),
+            effort: "high".into(),
+            default_environment: "cloud-default".into(),
+            synced_at: String::new(),
+        })
+        .unwrap();
+
+        assert!(db.agent_github("blueweb-client").unwrap().is_none());
+        let gh = AgentGithubRow {
+            token_env: "BLUEWEB_GITHUB_TOKEN".into(),
+            mounts: vec!["https://github.com/Opus1247/Iron-Fleet".into()],
+        };
+        db.set_agent_github("blueweb-client", Some(&gh)).unwrap();
+        assert_eq!(
+            db.agent_github("blueweb-client").unwrap().as_ref(),
+            Some(&gh)
+        );
+        db.set_agent_github("blueweb-client", None).unwrap();
+        assert!(db.agent_github("blueweb-client").unwrap().is_none());
+
+        assert!(db.agent_vault("blueweb-client").unwrap().is_none());
+        db.set_agent_vault("blueweb-client", "vlt_1").unwrap();
+        assert_eq!(
+            db.agent_vault("blueweb-client").unwrap().as_deref(),
+            Some("vlt_1")
+        );
+
+        assert!(db
+            .agent_credential("blueweb-client", "GH_TOKEN")
+            .unwrap()
+            .is_none());
+        let row = AgentCredentialRow {
+            credential_id: "vcrd_1".into(),
+            config_sha256: "aa".into(),
+        };
+        db.upsert_agent_credential("blueweb-client", "GH_TOKEN", &row)
+            .unwrap();
+        db.upsert_agent_credential(
+            "blueweb-client",
+            "GH_TOKEN",
+            &AgentCredentialRow {
+                config_sha256: "bb".into(),
+                ..row
+            },
+        )
+        .unwrap();
+        let got = db
+            .agent_credential("blueweb-client", "GH_TOKEN")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (got.credential_id.as_str(), got.config_sha256.as_str()),
+            ("vcrd_1", "bb")
+        );
+        assert!(db.agent_credential("jarvis", "GH_TOKEN").unwrap().is_none());
     }
 
     #[test]

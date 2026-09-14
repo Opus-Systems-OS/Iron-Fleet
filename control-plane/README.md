@@ -15,7 +15,7 @@ All routes except `/healthz` and `/webhooks/*` require
 |---|---|
 | `GET /healthz` | Liveness. Railway's healthcheck. |
 | `GET /agents` | The registry as synced: slug, Anthropic agent id/version, cap, effort, default environment. |
-| `POST /sessions` | `{agent_slug, task, environment?}` → creates a Managed Agents session pinned to the synced agent version, with that agent's `max_list_cost` cap and the task as the first `user.message`. Returns `201 {session_id, status, …, console_url}`. |
+| `POST /sessions` | `{agent_slug, task, environment?, repositories?}` → creates a Managed Agents session pinned to the synced agent version, with that agent's `max_list_cost` cap and the task as the first `user.message`. `repositories` is extra `https://github.com/<owner>/<repo>` URLs to clone into the sandbox on top of the agent's registry defaults (see "Per-agent vaults and repository mounts"); `400` on an agent with no `github` block. Returns `201 {session_id, status, …, console_url}`. |
 | `GET /sessions?agent_slug=&limit=&page=&order=` | Proxies `GET /v1/sessions`; the Anthropic envelope (`data`, `next_page`, `prev_page`) is returned unchanged except each item gains a `console_url`. |
 | `GET /sessions/{id}` | Proxies `GET /v1/sessions/{id}`; the session object is returned unchanged except for an added `console_url`. |
 | `POST /sessions/{id}/events` | `{task}` → appends one `user.message` to a running session. **Unconfirmed**: unlike the rest of this file, this endpoint path has no fixture from a live run yet — see `anthropic/mod.rs::send_events`'s doc comment. |
@@ -36,6 +36,8 @@ mean) with `upstream_status` and `request_id` for the support ticket.
 | `CONTROL_PLANE_TOKEN` | yes | Bearer token for the control plane's own API. `openssl rand -hex 32`. |
 | `MCP_FLEET_URL` | yes | `agents/jarvis.json` references `${MCP_FLEET_URL}` unconditionally (registry load fails without it) — any reachable-looking URL works if `mcp-fleet` isn't deployed yet, since Anthropic doesn't validate reachability at agent-create time. |
 | `MCP_FLEET_TOKEN` | no | Independent of the URL. When also set, provisions (once) a vault + `static_bearer` credential authenticating `mcp-fleet` and attaches it to every session's `vault_ids`. Without it, `mcp-fleet` connections are attempted unauthenticated. See `mcp-fleet/README.md`. |
+| `BLUEWEB_GITHUB_TOKEN` | yes* | Classic GitHub PAT (`repo`, `workflow`, `read:org`) for `blueweb-client`: becomes the sandbox's `GH_TOKEN` and the token that clones its repository mounts. *Required only because `agents/blueweb-client.json` names it — sync fails loud if a referenced `from_env` is unset. |
+| `BLUEWEB_CLOUDFLARE_API_TOKEN` | yes* | Cloudflare API token (Pages: Read) for `blueweb-client`: the sandbox's `CLOUDFLARE_API_TOKEN`. Same rule. |
 | `PORT` | no | Railway injects it. Default `8080`. |
 | `DATABASE_PATH` | no | Default `$RAILWAY_VOLUME_MOUNT_PATH/control-plane.db`, else `./control-plane.db`. |
 | `AGENTS_DIR` | no | Default `./agents`; `/app/agents` in the image. |
@@ -119,6 +121,46 @@ Provisioning a `self_hosted` environment (`rig-gpu`) returns an
 its key (CLAUDE.md). Sync surfaces it exactly once via `eprintln!` (never
 `tracing`, so it can't land in an aggregated log sink) and never stores it;
 see `worker/README.md` for what to do with it.
+
+## Per-agent vaults and repository mounts
+
+Two more registry-level blocks on `agents/<slug>.json`, both outside the
+verbatim `agent` body (so neither touches the agent's definition hash):
+
+```jsonc
+"credentials": [
+  { "secret_name": "GH_TOKEN", "from_env": "BLUEWEB_GITHUB_TOKEN",
+    "allowed_hosts": ["api.github.com", "github.com", "uploads.github.com"] }
+],
+"github": { "token_env": "BLUEWEB_GITHUB_TOKEN",
+            "mount": ["https://github.com/Opus1247/Iron-Fleet"] }
+```
+
+**`credentials`** → one vault per agent (`agent_vaults`), one
+`environment_variable` credential per entry (`agent_credentials`), attached
+only to *that agent's* sessions — unlike the mcp-fleet vault below, which
+rides on every session. The secret is read from `from_env` at sync time and
+sent straight to Anthropic; the registry never holds it, the logs never print
+it (`CredentialAuth`'s `Debug` redacts), and SQLite keeps only a SHA-256 over
+`(value, allowed_hosts)` so a rotated Railway variable becomes an in-place
+credential update on the next sync. Inside the sandbox the variable holds an
+opaque placeholder that Anthropic substitutes at egress, in request headers
+only, on the listed hosts only — which is why `gh` and `wrangler` work but a
+plain `git push` (HTTP Basic, base64) does not; the skill's
+`references/preflight.md` documents the `http.extraHeader` form. Cloud
+sandboxes only; `gpu-compute` cannot use these.
+
+**`github`** → every session of the agent mounts the `mount` repos as
+`github_repository` resources under `/workspace/<repo>`, authenticated with
+the token in `token_env` (read per request, never stored — `agent_github`
+keeps only the variable *name*). `POST /sessions … repositories: [...]` adds
+per-session repos on top. The token must be a **classic** PAT: fine-grained
+ones are scoped to one owner and this one has to reach both the fleet repo
+and `BlueWeb-Org/*`. Mounting a repo also loads its root `.claude/skills/`.
+
+If an `agent_credentials` row is lost while the credential still exists,
+Anthropic returns 409 on the recreate (`secret_name` is unique per vault);
+archive the stale credential in the Console, then sync again.
 
 ## The mcp-fleet vault
 

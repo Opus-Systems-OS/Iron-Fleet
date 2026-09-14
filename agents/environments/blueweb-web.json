@@ -1,0 +1,14 @@
+{
+  "slug": "blueweb-web",
+  "environment": {
+    "name": "blueweb-web",
+    "config": {
+      "type": "cloud",
+      "networking": { "type": "unrestricted" },
+      "packages": {
+        "apt": ["gh"],
+        "npm": ["wrangler"]
+      }
+    }
+  }
+}

@@ -26,6 +26,12 @@ pub struct StartSessionArgs {
     /// environment; only set this to deliberately override it.
     #[serde(default)]
     pub environment: Option<String>,
+    /// Extra GitHub repositories to clone into the sandbox for this session,
+    /// as `https://github.com/<owner>/<repo>` URLs — e.g. a customer's site
+    /// repo for a change request. The agent's registry defaults are always
+    /// mounted; only agents with GitHub access configured accept this.
+    #[serde(default)]
+    pub repositories: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -92,6 +98,7 @@ impl FleetServer {
             "agent_slug": args.agent_slug,
             "task": args.task,
             "environment": args.environment,
+            "repositories": args.repositories,
         });
         self.client.post("/sessions", &body).await
     }

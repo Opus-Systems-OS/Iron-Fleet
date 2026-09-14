@@ -73,17 +73,31 @@ pub async fn get_session(
     get_json(&state.http, &cfg, &format!("/sessions/{id}")).await
 }
 
+/// `repositories`: optional extra GitHub repo URLs to mount for this session,
+/// on top of the agent's registry defaults. Validated by the control plane;
+/// the token comes from there too — the app never sees it.
 #[tauri::command]
 pub async fn create_session(
     agent_slug: String,
     task: String,
+    repositories: Option<Vec<String>>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let cfg = require_config(&state)?;
     if agent_slug.trim().is_empty() || task.trim().is_empty() {
         return Err("agent and task are both required".to_owned());
     }
-    let body = serde_json::json!({ "agent_slug": agent_slug, "task": task });
+    let repositories: Vec<String> = repositories
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| r.trim().to_owned())
+        .filter(|r| !r.is_empty())
+        .collect();
+    let body = serde_json::json!({
+        "agent_slug": agent_slug,
+        "task": task,
+        "repositories": repositories,
+    });
     post_json(&state.http, &cfg, "/sessions", &body).await
 }
 

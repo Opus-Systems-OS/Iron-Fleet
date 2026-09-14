@@ -175,6 +175,23 @@ impl Client {
         .await
     }
 
+    /// Rotate a credential's secret in place (`secret_name` / `mcp_server_url`
+    /// are immutable; anything else goes through here).
+    pub async fn update_credential(
+        &self,
+        vault_id: &str,
+        credential_id: &str,
+        def: &CredentialUpdate,
+    ) -> Result<Credential> {
+        self.send(
+            Method::POST,
+            &format!("/v1/vaults/{vault_id}/credentials/{credential_id}"),
+            &[],
+            Some(def),
+        )
+        .await
+    }
+
     // ---- sessions
 
     pub async fn create_session(&self, body: &SessionCreate) -> Result<Session> {

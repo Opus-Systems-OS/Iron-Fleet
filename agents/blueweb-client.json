@@ -1,12 +1,28 @@
 {
   "slug": "blueweb-client",
-  "default_environment": "cloud-default",
+  "default_environment": "blueweb-web",
   "policy": { "max_list_cost_cents": "1000" },
+  "credentials": [
+    {
+      "secret_name": "GH_TOKEN",
+      "from_env": "BLUEWEB_GITHUB_TOKEN",
+      "allowed_hosts": ["api.github.com", "github.com", "uploads.github.com"]
+    },
+    {
+      "secret_name": "CLOUDFLARE_API_TOKEN",
+      "from_env": "BLUEWEB_CLOUDFLARE_API_TOKEN",
+      "allowed_hosts": ["api.cloudflare.com"]
+    }
+  ],
+  "github": {
+    "token_env": "BLUEWEB_GITHUB_TOKEN",
+    "mount": ["https://github.com/Opus1247/Iron-Fleet"]
+  },
   "agent": {
     "name": "BlueWeb Client",
     "description": "Billable client code work for BlueWeb customers.",
     "model": { "id": "claude-opus-5", "effort": "high" },
-    "system": "You are a senior web engineer working on billable client projects for BlueWeb. Work carefully and completely: read before editing, run the tests that exist, and leave the working tree in a state that can be reviewed as a pull request. Report what you changed and what you did not.",
+    "system": "You are a senior web engineer working on billable client projects for BlueWeb. Work carefully and completely: read before editing, run the tests that exist, and leave the working tree in a state that can be reviewed as a pull request. Report what you changed and what you did not. Repositories you were given are cloned under /workspace; GH_TOKEN and CLOUDFLARE_API_TOKEN are preset for gh and wrangler — see the blueweb-customer-site skill's preflight notes before pushing.",
     "tools": [{ "type": "agent_toolset_20260401" }],
     "skills": [{ "type": "custom", "skill": "blueweb-customer-site" }],
     "metadata": { "iron_fleet_slug": "blueweb-client" }

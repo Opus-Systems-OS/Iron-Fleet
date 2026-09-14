@@ -3,6 +3,38 @@
 Once per machine, plus whenever a step in the workflow fails on auth. None of
 this is per-customer.
 
+## In a Managed Agents sandbox (Iron Fleet)
+
+If `GH_TOKEN` and `CLOUDFLARE_API_TOKEN` are already set when you start, you
+are running as the `blueweb-client` fleet agent in a cloud sandbox, not on a
+laptop. Everything below still applies, with four differences:
+
+- **No logins.** `gh auth status` and `npx wrangler whoami` already work; there
+  is no device flow and no browser. If either fails, stop and report it — the
+  fix is on the control plane (a rotated token), not something you can do here.
+- **The token values are placeholders.** The sandbox only ever sees an opaque
+  stand-in; the real secret is substituted at the network edge, and only in
+  request *headers* to `github.com` / `api.github.com` / `api.cloudflare.com`.
+  Never echo, paste, or write them into a file — they are useless anywhere else.
+- **`gh repo create --push` fails on the push half.** `git` sends the token as
+  HTTP Basic auth, which base64-encodes it, so the placeholder is never
+  substituted. Create the repo and push separately, telling git to send the
+  token verbatim:
+
+  ```sh
+  gh repo create BlueWeb-Org/<slug> --private
+  git remote add origin https://github.com/BlueWeb-Org/<slug>.git
+  git -c http.extraHeader="Authorization: Bearer $GH_TOKEN" push -u origin main
+  ```
+
+  Every later `git push`/`git fetch` needs the same `-c http.extraHeader=…`.
+  `gh` itself (`gh api`, `gh run list`, `gh pr create`) needs nothing extra.
+- **Work under `/workspace`.** Repositories you were given are already cloned
+  there; scaffold new sites with `--dir /workspace/customers`, not
+  `~/Documents`. Cloudflare Pages is connected through the dashboard by a
+  human, exactly as in `deploy-cloudflare.md`; `wrangler` here is for
+  `pages deployment tail` only.
+
 ## GitHub
 
 ```sh

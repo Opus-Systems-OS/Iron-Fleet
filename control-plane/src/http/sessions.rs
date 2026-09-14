@@ -2,9 +2,10 @@
 //! proxied live to the Managed Agents API and passed through unchanged.
 
 use super::AppState;
-use crate::anthropic::types::{AgentRef, Budget, SessionCreate, UserMessageEvent};
+use crate::anthropic::types::{AgentRef, Budget, SessionCreate, SessionResource, UserMessageEvent};
 use crate::error::{Error, Result};
 use crate::money::Cents;
+use crate::registry::is_github_repo_url;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -34,6 +35,11 @@ pub struct CreateRequest {
     pub task: String,
     #[serde(default)]
     pub environment: Option<String>,
+    /// Extra `https://github.com/<owner>/<repo>` URLs to mount for this
+    /// session, on top of the agent's registry `github.mount` list. Needs the
+    /// agent to have a `github` block (that's where the token comes from).
+    #[serde(default)]
+    pub repositories: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -52,6 +58,61 @@ pub struct CreateResponse {
 #[derive(Debug, Serialize)]
 pub struct BudgetSummary {
     pub max_list_cost_cents: Cents,
+}
+
+/// The agent's registry `github.mount` list plus the request's extra
+/// `repositories`, deduped, each as a `github_repository` resource carrying
+/// the token named by `github.token_env`. The token is read from the
+/// process environment per request and never stored or logged.
+fn github_resources(
+    state: &AppState,
+    slug: &str,
+    extra: &[String],
+) -> Result<Vec<SessionResource>> {
+    let github = state.db.agent_github(slug)?;
+    let Some(github) = github else {
+        if extra.is_empty() {
+            return Ok(vec![]);
+        }
+        return Err(Error::InvalidRequest(format!(
+            "agent `{slug}` has no github block in its registry file, so it cannot mount repositories"
+        )));
+    };
+
+    let mut urls: Vec<String> = Vec::new();
+    for url in github.mounts.iter().chain(extra) {
+        let url = url.trim().trim_end_matches('/');
+        if !is_github_repo_url(url) {
+            return Err(Error::InvalidRequest(format!(
+                "repository `{url}` must be https://github.com/<owner>/<repo>"
+            )));
+        }
+        if !urls.iter().any(|u| u.eq_ignore_ascii_case(url)) {
+            urls.push(url.to_owned());
+        }
+    }
+    if urls.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let token = std::env::var(&github.token_env)
+        .ok()
+        .map(|t| t.trim().to_owned())
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| {
+            Error::Config(format!(
+                "agent `{slug}` mounts repositories but {} is not set in the control plane's environment",
+                github.token_env
+            ))
+        })?;
+
+    Ok(urls
+        .into_iter()
+        .map(|url| SessionResource::GithubRepository {
+            url,
+            authorization_token: token.clone(),
+        })
+        .collect())
 }
 
 pub async fn create(
@@ -81,6 +142,16 @@ pub async fn create(
         .environment_id
         .ok_or_else(|| Error::EnvironmentNotProvisioned(env_slug.clone()))?;
 
+    let resources = github_resources(&state, &agent.slug, &req.repositories)?;
+
+    // The fleet-wide mcp-fleet vault (harmless on an agent with no
+    // mcp_servers entry: a vault credential only applies to a server the
+    // agent's own definition references, by URL, at runtime — see
+    // docs.claude.com/managed-agents/vaults) plus this agent's own vault of
+    // sandbox secrets, if its registry file declares any.
+    let mut vault_ids: Vec<String> = state.mcp_fleet_vault_id.iter().cloned().collect();
+    vault_ids.extend(state.db.agent_vault(&agent.slug)?);
+
     let body = SessionCreate {
         agent: AgentRef::pinned(&agent.agent_id, agent.agent_version),
         environment_id: environment_id.clone(),
@@ -91,10 +162,8 @@ pub async fn create(
             ("iron_fleet_agent".to_owned(), agent.slug.clone()),
             ("iron_fleet_environment".to_owned(), env_slug.clone()),
         ]),
-        // Harmless on an agent with no mcp_servers entry: a vault credential
-        // only applies to a server the agent's own definition references, by
-        // URL, at runtime — see docs.claude.com/managed-agents/vaults.
-        vault_ids: state.mcp_fleet_vault_id.iter().cloned().collect(),
+        vault_ids,
+        resources,
     };
 
     let session = state.api.create_session(&body).await?;
@@ -104,6 +173,7 @@ pub async fn create(
         status = %session.status,
         environment = %env_slug,
         cap_cents = %agent.max_list_cost_cents,
+        repositories = body.resources.len(),
         "session created"
     );
 
