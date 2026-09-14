@@ -26,8 +26,10 @@ RUN mkdir -p control-plane/src worker/src app/src-tauri/src mcp-fleet/src \
  && echo '' > app/src-tauri/src/lib.rs \
  && echo 'fn main() {}' > mcp-fleet/src/main.rs \
  && cargo build --release -p mcp-fleet \
- && rm -rf control-plane/src worker/src app/src-tauri/src mcp-fleet/src \
-           target/release/deps/mcp_fleet-*
+ # Only mcp-fleet's own dummy src is replaced next — the other members'
+ # dummies must survive, since cargo re-resolves the whole workspace on every
+ # build and their real sources are never copied into this image at all.
+ && rm -rf mcp-fleet/src target/release/deps/mcp_fleet-*
 
 COPY mcp-fleet/src mcp-fleet/src
 RUN cargo build --release -p mcp-fleet
