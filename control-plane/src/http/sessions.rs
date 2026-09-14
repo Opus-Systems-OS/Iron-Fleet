@@ -13,6 +13,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+fn console_url(workspace: &str, session_id: &str) -> String {
+    format!("https://platform.claude.com/workspaces/{workspace}/sessions/{session_id}")
+}
+
+/// Same character rule Anthropic resource ids follow elsewhere in this file.
+fn valid_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 const TITLE_MAX_CHARS: usize = 80;
 
 #[derive(Debug, Deserialize)]
@@ -94,10 +106,7 @@ pub async fn create(
     Ok((
         StatusCode::CREATED,
         Json(CreateResponse {
-            console_url: format!(
-                "https://platform.claude.com/workspaces/{}/sessions/{}",
-                state.console_workspace, session.id
-            ),
+            console_url: console_url(&state.console_workspace, &session.id),
             session_id: session.id,
             status: session.status,
             agent_slug: agent.slug,
@@ -147,20 +156,70 @@ pub async fn list(
         query.push(("order", order.clone()));
     }
     let borrowed: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    Ok(Json(state.api.list_sessions_raw(&borrowed).await?))
+    let mut envelope = state.api.list_sessions_raw(&borrowed).await?;
+    if let Some(items) = envelope.get_mut("data").and_then(|d| d.as_array_mut()) {
+        for item in items {
+            if let Some(id) = item.get("id").and_then(|v| v.as_str()).map(str::to_owned) {
+                item["console_url"] = Value::String(console_url(&state.console_workspace, &id));
+            }
+        }
+    }
+    Ok(Json(envelope))
 }
 
 pub async fn get(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>> {
-    if id.is_empty()
-        || !id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-    {
+    if !valid_session_id(&id) {
         return Err(Error::InvalidRequest(
             "session id has unexpected characters".into(),
         ));
     }
-    Ok(Json(state.api.get_session_raw(&id).await?))
+    let mut session = state.api.get_session_raw(&id).await?;
+    session["console_url"] = Value::String(console_url(&state.console_workspace, &id));
+    Ok(Json(session))
+}
+
+/// Body of `POST /sessions/{id}/events`: one follow-up `user.message`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SendEventRequest {
+    pub task: String,
+}
+
+pub async fn send_event(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Result<Json<SendEventRequest>, JsonRejection>,
+) -> Result<Json<Value>> {
+    if !valid_session_id(&id) {
+        return Err(Error::InvalidRequest(
+            "session id has unexpected characters".into(),
+        ));
+    }
+    let Json(req) = body.map_err(|e| Error::InvalidRequest(e.body_text()))?;
+    let task = req.task.trim();
+    if task.is_empty() {
+        return Err(Error::InvalidRequest("task must not be empty".into()));
+    }
+    let result = state
+        .api
+        .send_events(&id, vec![UserMessageEvent::text(task)])
+        .await?;
+    tracing::info!(session = %id, "event sent");
+    Ok(Json(result))
+}
+
+pub async fn interrupt(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>> {
+    if !valid_session_id(&id) {
+        return Err(Error::InvalidRequest(
+            "session id has unexpected characters".into(),
+        ));
+    }
+    let result = state.api.interrupt_session(&id).await?;
+    tracing::info!(session = %id, "session interrupted");
+    Ok(Json(result))
 }
 
 fn title_from(task: &str) -> String {
@@ -175,6 +234,22 @@ fn title_from(task: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn console_url_is_the_documented_format() {
+        assert_eq!(
+            console_url("default", "sesn_1"),
+            "https://platform.claude.com/workspaces/default/sessions/sesn_1"
+        );
+    }
+
+    #[test]
+    fn session_id_validation_matches_agent_id_charset() {
+        assert!(valid_session_id("sesn_01ABCxyz-_9"));
+        assert!(!valid_session_id(""));
+        assert!(!valid_session_id("../etc/passwd"));
+        assert!(!valid_session_id("sesn 1"));
+    }
 
     #[test]
     fn title_is_first_line_truncated() {

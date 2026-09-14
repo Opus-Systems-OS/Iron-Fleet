@@ -3,6 +3,7 @@
 pub mod agents;
 pub mod health;
 pub mod sessions;
+pub mod usage;
 
 use crate::anthropic::Client;
 use crate::db::Db;
@@ -33,6 +34,9 @@ pub fn router(state: AppState) -> Router {
         .route("/agents", get(agents::list))
         .route("/sessions", post(sessions::create).get(sessions::list))
         .route("/sessions/{id}", get(sessions::get))
+        .route("/sessions/{id}/events", post(sessions::send_event))
+        .route("/sessions/{id}/interrupt", post(sessions::interrupt))
+        .route("/usage", get(usage::get))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_bearer,

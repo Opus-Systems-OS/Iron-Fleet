@@ -177,6 +177,14 @@ impl UserMessageEvent {
     }
 }
 
+/// Body of `POST /v1/sessions/{id}/events`. Shape mirrors `SessionCreate`'s
+/// `initial_events`. **Unconfirmed** — unlike the rest of this file, nothing
+/// has exercised this against the live API yet; see `Client::send_events`.
+#[derive(Debug, Clone, Serialize)]
+pub struct SendEvents {
+    pub events: Vec<UserMessageEvent>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionCreate {
     pub agent: AgentRef,

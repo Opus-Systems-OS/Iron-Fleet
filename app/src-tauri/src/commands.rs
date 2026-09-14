@@ -4,8 +4,10 @@
 //! sets no `Access-Control-Allow-Origin` header) and keeps the bearer token
 //! out of the page's JS-visible network layer.
 //!
-//! Stage 3 is the read-only Fleet Dashboard: these commands only ever `GET`.
-//! Starting or steering a session is stage 4.
+//! Stage 3 added the read-only dashboard (`GET` only). Stage 4 adds session
+//! controls — start, follow up, interrupt — and the Usage tab. There is still
+//! no way to raise a session's cap: the control plane's budgets are
+//! create-only, so no route exists for it at any layer.
 
 use crate::config::ControlPlaneConfig;
 use crate::AppState;
@@ -53,8 +55,8 @@ pub async fn list_agents(state: State<'_, AppState>) -> Result<serde_json::Value
     get_json(&state.http, &cfg, "/agents").await
 }
 
-/// Most recent 50 sessions, newest first. Pagination is a stage 4 concern —
-/// the dashboard is a live snapshot, not a session browser, in stage 3.
+/// Most recent 50 sessions, newest first. Pagination is out of scope — the
+/// dashboard is a live snapshot, not a session browser.
 #[tauri::command]
 pub async fn list_sessions(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let cfg = require_config(&state)?;
@@ -67,14 +69,72 @@ pub async fn get_session(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let cfg = require_config(&state)?;
-    if id.is_empty()
-        || !id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-    {
-        return Err("invalid session id".to_owned());
-    }
+    let id = valid_id(id)?;
     get_json(&state.http, &cfg, &format!("/sessions/{id}")).await
+}
+
+#[tauri::command]
+pub async fn create_session(
+    agent_slug: String,
+    task: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let cfg = require_config(&state)?;
+    if agent_slug.trim().is_empty() || task.trim().is_empty() {
+        return Err("agent and task are both required".to_owned());
+    }
+    let body = serde_json::json!({ "agent_slug": agent_slug, "task": task });
+    post_json(&state.http, &cfg, "/sessions", &body).await
+}
+
+/// Append a follow-up message to a running session.
+#[tauri::command]
+pub async fn send_session_event(
+    id: String,
+    task: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let cfg = require_config(&state)?;
+    let id = valid_id(id)?;
+    if task.trim().is_empty() {
+        return Err("message must not be empty".to_owned());
+    }
+    let body = serde_json::json!({ "task": task });
+    post_json(&state.http, &cfg, &format!("/sessions/{id}/events"), &body).await
+}
+
+#[tauri::command]
+pub async fn interrupt_session(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let cfg = require_config(&state)?;
+    let id = valid_id(id)?;
+    post_json(
+        &state.http,
+        &cfg,
+        &format!("/sessions/{id}/interrupt"),
+        &serde_json::Value::Null,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn get_usage(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let cfg = require_config(&state)?;
+    get_json(&state.http, &cfg, "/usage").await
+}
+
+fn valid_id(id: String) -> Result<String, String> {
+    let ok = !id.is_empty()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    if ok {
+        Ok(id)
+    } else {
+        Err("invalid session id".to_owned())
+    }
 }
 
 fn require_config(state: &AppState) -> Result<ControlPlaneConfig, String> {
@@ -98,6 +158,30 @@ async fn get_json(
         .send()
         .await
         .map_err(|e| format!("could not reach {}: {e}", cfg.url))?;
+    read_response(resp).await
+}
+
+/// `body: &Value::Null` sends no request body at all (for endpoints like
+/// `/interrupt` that take none) rather than a literal JSON `null`.
+async fn post_json(
+    http: &reqwest::Client,
+    cfg: &ControlPlaneConfig,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let url = format!("{}{}", cfg.url, path);
+    let mut req = http.post(&url).bearer_auth(&cfg.token);
+    if !body.is_null() {
+        req = req.json(body);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("could not reach {}: {e}", cfg.url))?;
+    read_response(resp).await
+}
+
+async fn read_response(resp: reqwest::Response) -> Result<serde_json::Value, String> {
     let status = resp.status();
     let body: serde_json::Value = resp
         .json()

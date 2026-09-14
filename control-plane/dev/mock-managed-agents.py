@@ -78,6 +78,20 @@ class H(BaseHTTPRequestHandler):
                           "list_cost": {"amount": "1", "currency": "USD"}},
             }
             return self._json(200, STATE["sessions"][sid])
+        if p.startswith("/v1/sessions/") and p.endswith("/events"):
+            sid = p.split("/")[3]
+            s = STATE["sessions"].get(sid)
+            if not s:
+                return self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "no such session"}})
+            s["status"] = "running"
+            return self._json(200, s)
+        if p.startswith("/v1/sessions/") and p.endswith("/interrupt"):
+            sid = p.split("/")[3]
+            s = STATE["sessions"].get(sid)
+            if not s:
+                return self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "no such session"}})
+            s["status"] = "idle"
+            return self._json(200, s)
         self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": p}})
 
     def do_GET(self):

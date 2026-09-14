@@ -15,6 +15,10 @@
           <span class="brand-mark">IF</span>
           <span class="brand-name">Iron Fleet</span>
         </div>
+        <nav class="tabs" id="tabs">
+          <button class="tab-button active" data-tab="fleet" type="button">Fleet</button>
+          <button class="tab-button" data-tab="usage" type="button">Usage</button>
+        </nav>
         <div class="topbar-right">
           <span id="last-updated" class="last-updated"></span>
           <span id="connection-badge" class="badge badge-unknown">checking…</span>
@@ -42,43 +46,103 @@
       <main class="content">
         <div id="error-banner" class="error-banner" hidden></div>
 
-        <section class="panel">
-          <h2>Agents</h2>
-          <table class="fleet-table" id="agents-table">
-            <thead>
-              <tr>
-                <th>Slug</th>
-                <th>Effort</th>
-                <th>Cap</th>
-                <th>Environment</th>
-                <th>Version</th>
-                <th>Synced</th>
-              </tr>
-            </thead>
-            <tbody id="agents-body">
-              <tr class="empty-row"><td colspan="6">Not connected.</td></tr>
-            </tbody>
-          </table>
+        <section id="tab-fleet" class="tab-panel">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>New session</h2>
+            </div>
+            <form id="new-session-form" class="inline-form">
+              <select id="new-session-agent" required>
+                <option value="" disabled selected>Agent…</option>
+              </select>
+              <input id="new-session-task" type="text" placeholder="Task for the agent…" required />
+              <button type="submit">Start</button>
+              <span id="new-session-error" class="settings-error"></span>
+            </form>
+          </section>
+
+          <section class="panel">
+            <h2>Agents</h2>
+            <table class="fleet-table" id="agents-table">
+              <thead>
+                <tr>
+                  <th>Slug</th>
+                  <th>Effort</th>
+                  <th>Cap</th>
+                  <th>Environment</th>
+                  <th>Version</th>
+                  <th>Synced</th>
+                </tr>
+              </thead>
+              <tbody id="agents-body">
+                <tr class="empty-row"><td colspan="6">Not connected.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="panel">
+            <h2>Sessions</h2>
+            <table class="fleet-table" id="sessions-table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Title</th>
+                  <th>Agent</th>
+                  <th>Environment</th>
+                  <th>Cost / Cap</th>
+                  <th>Active</th>
+                  <th>Updated</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="sessions-body">
+                <tr class="empty-row"><td colspan="8">Not connected.</td></tr>
+              </tbody>
+            </table>
+          </section>
         </section>
 
-        <section class="panel">
-          <h2>Sessions</h2>
-          <table class="fleet-table" id="sessions-table">
-            <thead>
-              <tr>
-                <th>Status</th>
-                <th>Title</th>
-                <th>Agent</th>
-                <th>Environment</th>
-                <th>Cost / Cap</th>
-                <th>Active</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody id="sessions-body">
-              <tr class="empty-row"><td colspan="7">Not connected.</td></tr>
-            </tbody>
-          </table>
+        <section id="tab-usage" class="tab-panel" hidden>
+          <section class="panel">
+            <h2>Spend by agent</h2>
+            <table class="fleet-table" id="usage-agents-table">
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th>Sessions</th>
+                  <th>Total cost</th>
+                  <th>Budget reached</th>
+                </tr>
+              </thead>
+              <tbody id="usage-agents-body">
+                <tr class="empty-row"><td colspan="4">Not connected.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="panel">
+            <h2>Recent activity</h2>
+            <p class="panel-note">
+              Built from webhook deliveries — a session with no rollup yet is still running or its
+              webhook hasn't landed.
+            </p>
+            <table class="fleet-table" id="usage-recent-table">
+              <thead>
+                <tr>
+                  <th>Session</th>
+                  <th>Agent</th>
+                  <th>Environment</th>
+                  <th>Cost</th>
+                  <th>Active</th>
+                  <th>Budget reached</th>
+                  <th>Observed</th>
+                </tr>
+              </thead>
+              <tbody id="usage-recent-body">
+                <tr class="empty-row"><td colspan="7">Not connected.</td></tr>
+              </tbody>
+            </table>
+          </section>
         </section>
       </main>
     </div>

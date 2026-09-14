@@ -23,6 +23,7 @@ pub struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let config_path = app.path().app_config_dir()?.join("control-plane.json");
             let config =
@@ -44,6 +45,10 @@ pub fn run() {
             commands::list_agents,
             commands::list_sessions,
             commands::get_session,
+            commands::create_session,
+            commands::send_session_event,
+            commands::interrupt_session,
+            commands::get_usage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,8 +2,9 @@
 
 The one service Iron-Fleet runs. Holds the agent registry, budget policy and
 usage rollups in SQLite; everything about sessions is read live from the
-Managed Agents API. Stage 1 of the build order: start a session from `curl`,
-receive the webhook back.
+Managed Agents API. Started life as stage 1 of the build order (start a
+session from `curl`, receive the webhook back); now also carries the session
+controls and Usage tab endpoints stage 4's dashboard calls.
 
 ## Endpoints
 
@@ -15,8 +16,11 @@ All routes except `/healthz` and `/webhooks/*` require
 | `GET /healthz` | Liveness. Railway's healthcheck. |
 | `GET /agents` | The registry as synced: slug, Anthropic agent id/version, cap, effort, default environment. |
 | `POST /sessions` | `{agent_slug, task, environment?}` → creates a Managed Agents session pinned to the synced agent version, with that agent's `max_list_cost` cap and the task as the first `user.message`. Returns `201 {session_id, status, …, console_url}`. |
-| `GET /sessions?agent_slug=&limit=&page=&order=` | Proxies `GET /v1/sessions`; the Anthropic envelope (`data`, `next_page`, `prev_page`) is returned unchanged. |
-| `GET /sessions/{id}` | Proxies `GET /v1/sessions/{id}`; the session object is returned unchanged. |
+| `GET /sessions?agent_slug=&limit=&page=&order=` | Proxies `GET /v1/sessions`; the Anthropic envelope (`data`, `next_page`, `prev_page`) is returned unchanged except each item gains a `console_url`. |
+| `GET /sessions/{id}` | Proxies `GET /v1/sessions/{id}`; the session object is returned unchanged except for an added `console_url`. |
+| `POST /sessions/{id}/events` | `{task}` → appends one `user.message` to a running session. **Unconfirmed**: unlike the rest of this file, this endpoint path has no fixture from a live run yet — see `anthropic/mod.rs::send_events`'s doc comment. |
+| `POST /sessions/{id}/interrupt` | Stops a session's in-flight work without ending it. Same unconfirmed-endpoint caveat as `/events`. |
+| `GET /usage` | `{by_agent: [{agent_slug, session_count, total_list_cost_cents, budget_reached_count}], recent: [...session_usage rows]}`. Built entirely from the local `session_usage` rollup — no Anthropic call, so it's only as fresh as the last webhook delivery. |
 | `POST /webhooks/managed-agents` | Anthropic → us. Verifies the Standard Webhooks HMAC, dedupes on event id, handles `session.status_idled` (INFO log) and `session.budget_reached` (WARN log), records a usage rollup. |
 
 Errors are always `{"error": {"type": "...", "message": "..."}}`. Upstream

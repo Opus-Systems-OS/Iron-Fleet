@@ -131,6 +131,35 @@ impl Client {
         self.send::<Value>(Method::GET, "/v1/sessions", query, None::<&()>)
             .await
     }
+
+    /// Append events to a running session (e.g. a follow-up `user.message`).
+    /// **Unconfirmed** — see `SendEvents`'s doc comment; no fixture from a live
+    /// run backs this endpoint path yet, unlike the rest of this client.
+    pub async fn send_events(
+        &self,
+        session_id: &str,
+        events: Vec<UserMessageEvent>,
+    ) -> Result<Value> {
+        self.send::<Value>(
+            Method::POST,
+            &format!("/v1/sessions/{session_id}/events"),
+            &[],
+            Some(&SendEvents { events }),
+        )
+        .await
+    }
+
+    /// Stop a session's in-flight work without ending the session. Same
+    /// unconfirmed-endpoint caveat as `send_events`.
+    pub async fn interrupt_session(&self, session_id: &str) -> Result<Value> {
+        self.send::<Value>(
+            Method::POST,
+            &format!("/v1/sessions/{session_id}/interrupt"),
+            &[],
+            None::<&()>,
+        )
+        .await
+    }
 }
 
 fn upstream_error(
