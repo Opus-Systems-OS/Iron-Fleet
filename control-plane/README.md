@@ -34,7 +34,6 @@ mean) with `upstream_status` and `request_id` for the support ticket.
 | `ANTHROPIC_API_KEY` | yes | |
 | `ANTHROPIC_WEBHOOK_SIGNING_KEY` | yes | The `whsec_…` value shown once when the endpoint is created in Console → Manage → Webhooks. |
 | `CONTROL_PLANE_TOKEN` | yes | Bearer token for the control plane's own API. `openssl rand -hex 32`. |
-| `MCP_FLEET_URL`, `MCP_FLEET_TOKEN` | yes | Substituted into `agents/jarvis.json`'s `mcp_servers` entry (see below) — sync fails without them, since every `${VAR}` in the registry must resolve. Must match what `mcp-fleet` itself is booted with. |
 | `PORT` | no | Railway injects it. Default `8080`. |
 | `DATABASE_PATH` | no | Default `$RAILWAY_VOLUME_MOUNT_PATH/control-plane.db`, else `./control-plane.db`. |
 | `AGENTS_DIR` | no | Default `./agents`; `/app/agents` in the image. |
@@ -59,11 +58,15 @@ mean) with `upstream_status` and `request_id` for the support ticket.
 `agents/environments/<slug>.json` holds `{ "slug", "environment": { verbatim POST /v1/environments body } }`.
 
 A file may reference `${VAR_NAME}`, expanded from `control-plane`'s own
-process environment before the JSON is parsed — how `agents/jarvis.json`
-points at `mcp-fleet` without committing its URL or bearer token. This runs
-on raw text, so a substituted value can't itself contain a character that
-needs JSON escaping (`"`, backslash, control characters) — fine for tokens
-and URLs, not a general templating engine.
+process environment before the JSON is parsed — meant for wiring a secret
+(an MCP server's bearer token, say) into a committed file without ever
+committing the value itself. Not in active use yet: `agents/jarvis.json`
+doesn't reference `mcp-fleet` for now (see `mcp-fleet/README.md` — the real
+Managed Agents `mcp_servers` request shape needs confirming against a live
+run before that's safe to wire back in). This runs on raw text, so a
+substituted value can't itself contain a character that needs JSON escaping
+(`"`, backslash, control characters) — fine for tokens and URLs, not a
+general templating engine.
 
 On boot (and on `control-plane sync`) the service reconciles this directory
 with Anthropic: unknown agents are created, changed ones (content hash) are
@@ -94,8 +97,6 @@ Two API facts that shape this:
 export ANTHROPIC_API_KEY=sk-ant-…
 export ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_…      # any valid whsec_ works locally
 export CONTROL_PLANE_TOKEN=dev
-export MCP_FLEET_URL=http://127.0.0.1:8090/mcp    # substituted into jarvis.json; any value works if mcp-fleet isn't running
-export MCP_FLEET_TOKEN=dev-mcp-token
 cargo run -p control-plane                          # boot sync, then listen on :8080
 
 curl -H 'Authorization: Bearer dev' localhost:8080/agents

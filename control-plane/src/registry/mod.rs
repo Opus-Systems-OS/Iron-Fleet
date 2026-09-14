@@ -208,14 +208,6 @@ mod tests {
 
     #[test]
     fn committed_fleet_loads_and_matches_claude_md() {
-        // jarvis.json references ${MCP_FLEET_URL} / ${MCP_FLEET_TOKEN} so the
-        // real values never get committed. No other test reads these two
-        // names, so setting them here doesn't race parallel test execution.
-        unsafe {
-            std::env::set_var("MCP_FLEET_URL", "https://mcp-fleet.internal.example/mcp");
-            std::env::set_var("MCP_FLEET_TOKEN", "test-mcp-fleet-token");
-        }
-
         let reg = load_dir(&repo_agents_dir()).unwrap();
         let cap = |s: &str| reg.agents[s].policy.max_list_cost_cents.get();
         let effort = |s: &str| reg.agents[s].agent.model.effort.unwrap().as_str();
@@ -236,9 +228,6 @@ mod tests {
             reg.agents["jarvis"].agent.metadata[SLUG_METADATA_KEY],
             "jarvis"
         );
-        let mcp = &reg.agents["jarvis"].agent.mcp_servers[0];
-        assert_eq!(mcp["url"], "https://mcp-fleet.internal.example/mcp");
-        assert_eq!(mcp["authorization_token"], "test-mcp-fleet-token");
     }
 
     #[test]

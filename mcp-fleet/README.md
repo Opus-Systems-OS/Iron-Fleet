@@ -39,9 +39,10 @@ jarvis sees a message it can react to, not a crashed connection.
   own token. Deliberately separate: holding this token only proves "I can
   use the five jarvis tools," never "I can call the control plane directly."
 
-## Wiring it to jarvis — and what's unconfirmed
+## Wiring it to jarvis — not done yet, and here's why
 
-`agents/jarvis.json` references the server via:
+`agents/jarvis.json` does **not** reference this server yet. The first
+attempt did, shaped like Anthropic's public Messages API MCP connector:
 
 ```json
 "mcp_servers": [
@@ -49,18 +50,21 @@ jarvis sees a message it can react to, not a crashed connection.
 ]
 ```
 
-`${VAR}` is expanded from `control-plane`'s own environment at sync time
-(`registry::substitute_env_vars`) so neither the URL nor the token is ever
-committed — set `MCP_FLEET_URL` and `MCP_FLEET_TOKEN` wherever
-`control-plane` runs, matching the value this server is booted with.
+That shape was the closest confirmed real-world precedent available, but it
+was a guess for the Managed Agents `POST /v1/agents` body specifically (as
+opposed to a single Messages API call), and the live API rejected it outright
+the moment this deployed: `400 invalid_request_error: Failed to parse
+request body: unknown field "authorization_token"`. Pulled back out rather
+than left guessing against production a second time.
 
-The `mcp_servers` object shape above mirrors Anthropic's public Messages API
-MCP connector (`type: "url"`, `url`, `name`, `authorization_token`), the
-closest confirmed real-world precedent — but whether Managed Agents accepts
-exactly this shape for a *hosted* agent (as opposed to a single Messages API
-call) has not been exercised against the live API. Same caveat as
-`worker/`'s protocol and `control-plane`'s `/events` and `/interrupt`
-routes: expect a follow-up fix once this runs for real.
+To re-wire it correctly: find out the real field name for a bearer token on
+an `mcp_servers` entry (or the right shape entirely) — from Anthropic's
+actual Managed Agents docs, not by inference from a different endpoint —
+then put the block above back in `agents/jarvis.json` with that shape.
+`registry::substitute_env_vars` (`control-plane/src/registry/mod.rs`) is
+already there and tested, ready to expand `${MCP_FLEET_URL}` /
+`${MCP_FLEET_TOKEN}` again once the shape's right; nothing else needs to
+change for that half of it.
 
 ## Local run
 
@@ -74,7 +78,6 @@ worth repeating if you touch `server.rs`:
 python3 control-plane/dev/mock-managed-agents.py 9999
 ANTHROPIC_BASE_URL=http://127.0.0.1:9999 ANTHROPIC_API_KEY=test \
   ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_test CONTROL_PLANE_TOKEN=dev \
-  MCP_FLEET_URL=http://127.0.0.1:8090/mcp MCP_FLEET_TOKEN=dev-mcp-token \
   cargo run -p control-plane -- serve
 # 3. mcp-fleet itself
 CONTROL_PLANE_URL=http://127.0.0.1:8080 CONTROL_PLANE_TOKEN=dev \
