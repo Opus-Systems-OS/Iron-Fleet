@@ -113,10 +113,15 @@ curl localhost:8090/healthz
 | `PORT` | no | Default `8090`. |
 | `RUST_LOG` | no | Default `info`. |
 
-## Not here
+## Deployment
 
-Where this actually deploys is an open decision — CLAUDE.md's "Open
-decisions" section only records `control-plane`'s Railway hosting so far.
-It needs the same thing `control-plane` needed: a public HTTPS endpoint,
-since Anthropic's Managed Agents session reaches it as a remote URL, not a
-local child process. `Dockerfile` is ready; nothing has provisioned it yet.
+Runs as its own Railway service, `mcp-fleet`, in the same project as
+`control-plane` (`practical-compassion`) — same repo, `mcp-fleet/Dockerfile`
+as the build source, a generated `*.up.railway.app` domain. Not yet folded
+into `.railway/railway.ts`'s tracked history the way `control-plane`'s
+first deploy was (CLAUDE.md's "Open decisions" section only records
+`control-plane`'s Railway hosting; this repo's own IaC file is now the
+source of truth for both services going forward — `railway config pull`
+picks up drift). `CONTROL_PLANE_URL`, `CONTROL_PLANE_TOKEN`, and
+`MCP_FLEET_TOKEN` are set to match `control-plane`'s own values;
+`control-plane`'s `MCP_FLEET_URL` points back at this service's domain.
