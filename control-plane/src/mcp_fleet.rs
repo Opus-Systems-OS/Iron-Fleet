@@ -10,9 +10,19 @@ use crate::db::Db;
 use crate::error::Result;
 use std::collections::BTreeMap;
 
-/// Idempotent: does nothing (beyond a log line) if a vault for this exact
-/// `mcp_server_url` was already provisioned in a prior boot. Returns the
-/// vault id to attach to every session via `vault_ids`.
+/// Idempotent: does nothing (beyond a log line) if a credential for this
+/// exact `mcp_server_url` was already provisioned in a prior boot. Returns
+/// the vault id to attach to every session via `vault_ids`.
+///
+/// A credential's `mcp_server_url` is immutable once created (the old one
+/// can't just be edited in place when `MCP_FLEET_URL` changes — e.g. moving
+/// from a placeholder to `mcp-fleet`'s real deployed URL), but a vault holds
+/// up to 20 credentials and the key only has to be unique *within* the
+/// vault, so the fix is a new credential in the same vault, not a new vault.
+/// The stale credential for the old URL is left in place rather than
+/// archived — it matches nothing any agent references anymore, so it's
+/// inert, and archiving requires the credential id we deliberately don't
+/// keep around (see `db::McpFleetVaultRow`'s doc comment).
 pub async fn ensure_vault(
     api: &Client,
     db: &Db,
@@ -24,15 +34,14 @@ pub async fn ensure_vault(
             tracing::debug!(vault_id = %existing.vault_id, "mcp-fleet vault already provisioned");
             return Ok(existing.vault_id);
         }
-        // The credential key (mcp_server_url) is immutable once created — the
-        // old one has to be archived by hand before a new one can replace it,
-        // so this needs an operator, not an auto-heal.
-        tracing::warn!(
-            stored_url = %existing.mcp_server_url,
-            configured_url = %mcp_server_url,
-            "MCP_FLEET_URL no longer matches the provisioned vault credential; archive \
-             the old credential and delete the mcp_fleet_vault row to reprovision"
+        tracing::info!(
+            vault_id = %existing.vault_id,
+            old_url = %existing.mcp_server_url,
+            new_url = %mcp_server_url,
+            "MCP_FLEET_URL changed; adding a new credential to the existing vault"
         );
+        let credential = create_credential(api, &existing.vault_id, mcp_server_url, token).await?;
+        db.set_mcp_fleet_vault(&existing.vault_id, &credential.id, mcp_server_url)?;
         return Ok(existing.vault_id);
     }
 
@@ -42,19 +51,27 @@ pub async fn ensure_vault(
             metadata: BTreeMap::new(),
         })
         .await?;
-    let credential = api
-        .create_credential(
-            &vault.id,
-            &CredentialCreate {
-                display_name: "mcp-fleet".into(),
-                auth: CredentialAuth::StaticBearer {
-                    mcp_server_url: mcp_server_url.to_owned(),
-                    token: token.to_owned(),
-                },
-            },
-        )
-        .await?;
+    let credential = create_credential(api, &vault.id, mcp_server_url, token).await?;
     tracing::info!(vault_id = %vault.id, credential_id = %credential.id, "mcp-fleet vault provisioned");
     db.set_mcp_fleet_vault(&vault.id, &credential.id, mcp_server_url)?;
     Ok(vault.id)
+}
+
+async fn create_credential(
+    api: &Client,
+    vault_id: &str,
+    mcp_server_url: &str,
+    token: &str,
+) -> Result<crate::anthropic::types::Credential> {
+    api.create_credential(
+        vault_id,
+        &CredentialCreate {
+            display_name: "mcp-fleet".into(),
+            auth: CredentialAuth::StaticBearer {
+                mcp_server_url: mcp_server_url.to_owned(),
+                token: token.to_owned(),
+            },
+        },
+    )
+    .await
 }
