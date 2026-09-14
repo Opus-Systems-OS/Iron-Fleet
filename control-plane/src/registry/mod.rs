@@ -138,10 +138,40 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
         path: path.to_path_buf(),
         reason: e.to_string(),
     })?;
+    let text = substitute_env_vars(path, &text)?;
     serde_json::from_str(&text).map_err(|e| Error::Registry {
         path: path.to_path_buf(),
         reason: e.to_string(),
     })
+}
+
+/// Expands `${VAR_NAME}` to `std::env::var("VAR_NAME")` before parsing, so a
+/// committed file can reference a secret (an MCP server's bearer token, say)
+/// without that secret ever being committed — CLAUDE.md: "never commit an
+/// API key, environment key, or GitHub token." This runs on raw text before
+/// JSON parsing, so a substituted value must not itself need JSON escaping
+/// (no `"`, backslash, or control characters) — fine for tokens and URLs,
+/// not a general templating engine.
+fn substitute_env_vars(path: &Path, text: &str) -> Result<String> {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let end = after.find('}').ok_or_else(|| Error::Registry {
+            path: path.to_path_buf(),
+            reason: "unterminated ${...}".into(),
+        })?;
+        let name = &after[..end];
+        let value = std::env::var(name).map_err(|_| Error::Registry {
+            path: path.to_path_buf(),
+            reason: format!("${{{name}}} is not set"),
+        })?;
+        out.push_str(&value);
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
 }
 
 fn check_slug_matches_filename(path: &Path, slug: &str) -> Result<()> {
@@ -178,6 +208,14 @@ mod tests {
 
     #[test]
     fn committed_fleet_loads_and_matches_claude_md() {
+        // jarvis.json references ${MCP_FLEET_URL} / ${MCP_FLEET_TOKEN} so the
+        // real values never get committed. No other test reads these two
+        // names, so setting them here doesn't race parallel test execution.
+        unsafe {
+            std::env::set_var("MCP_FLEET_URL", "https://mcp-fleet.internal.example/mcp");
+            std::env::set_var("MCP_FLEET_TOKEN", "test-mcp-fleet-token");
+        }
+
         let reg = load_dir(&repo_agents_dir()).unwrap();
         let cap = |s: &str| reg.agents[s].policy.max_list_cost_cents.get();
         let effort = |s: &str| reg.agents[s].agent.model.effort.unwrap().as_str();
@@ -198,6 +236,23 @@ mod tests {
             reg.agents["jarvis"].agent.metadata[SLUG_METADATA_KEY],
             "jarvis"
         );
+        let mcp = &reg.agents["jarvis"].agent.mcp_servers[0];
+        assert_eq!(mcp["url"], "https://mcp-fleet.internal.example/mcp");
+        assert_eq!(mcp["authorization_token"], "test-mcp-fleet-token");
+    }
+
+    #[test]
+    fn env_var_substitution_expands_and_reports_missing() {
+        unsafe {
+            std::env::set_var("IRON_FLEET_TEST_SUBSTITUTE_VAR", "shhh");
+        }
+        let p = Path::new("test.json");
+        assert_eq!(
+            substitute_env_vars(p, r#"{"a":"${IRON_FLEET_TEST_SUBSTITUTE_VAR}!"}"#).unwrap(),
+            r#"{"a":"shhh!"}"#
+        );
+        let err = substitute_env_vars(p, "${IRON_FLEET_TEST_DOES_NOT_EXIST}").unwrap_err();
+        assert!(err.to_string().contains("IRON_FLEET_TEST_DOES_NOT_EXIST"));
     }
 
     #[test]

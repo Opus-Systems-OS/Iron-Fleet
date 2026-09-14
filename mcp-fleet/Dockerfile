@@ -1,15 +1,16 @@
-# Iron-Fleet control plane — Railway deployment image.
+# Iron-Fleet mcp-fleet — deployment image.
 #
-# Build context is the REPO ROOT (the workspace Cargo.toml and agents/ are
-# needed), so build with:   docker build -f control-plane/Dockerfile .
-# Railway does this for you when the service's Dockerfile path is
-# control-plane/Dockerfile and the root directory is the repo root.
+# Build context is the REPO ROOT (needs the workspace Cargo.toml), so build
+# with:   docker build -f mcp-fleet/Dockerfile .
+# Where this actually runs is an open decision (CLAUDE.md documents only
+# control-plane's Railway hosting so far) — it needs the same thing
+# control-plane needed: a public HTTPS endpoint, since Anthropic's Managed
+# Agents session reaches it as a remote `mcp_servers` URL.
 
 # ---- build ---------------------------------------------------------------
 FROM rust:1-bookworm AS build
 WORKDIR /src
 
-# Cache dependency compilation separately from source changes.
 COPY Cargo.toml Cargo.lock ./
 # Every workspace member's Cargo.toml has to be present for cargo to resolve
 # the workspace at all, even ones this image never builds — cargo checks
@@ -24,12 +25,12 @@ RUN mkdir -p control-plane/src worker/src app/src-tauri/src mcp-fleet/src \
  && echo 'fn main() {}' > app/src-tauri/src/main.rs \
  && echo '' > app/src-tauri/src/lib.rs \
  && echo 'fn main() {}' > mcp-fleet/src/main.rs \
- && cargo build --release -p control-plane \
+ && cargo build --release -p mcp-fleet \
  && rm -rf control-plane/src worker/src app/src-tauri/src mcp-fleet/src \
-           target/release/deps/control_plane-*
+           target/release/deps/mcp_fleet-*
 
-COPY control-plane/src control-plane/src
-RUN cargo build --release -p control-plane
+COPY mcp-fleet/src mcp-fleet/src
+RUN cargo build --release -p mcp-fleet
 
 # ---- runtime -------------------------------------------------------------
 FROM debian:bookworm-slim
@@ -38,15 +39,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=build /src/target/release/control-plane /usr/local/bin/control-plane
-# The committed fleet definition ships in the image; boot sync reads it.
-COPY agents /app/agents
+COPY --from=build /src/target/release/mcp-fleet /usr/local/bin/mcp-fleet
 
-# Runs as root on purpose: Railway volumes are mounted root-owned and Railway's
-# documented workaround for non-root images is RAILWAY_RUN_UID=0 anyway. The
-# process only ever writes to the volume path.
-ENV AGENTS_DIR=/app/agents \
-    RUST_LOG=info,tower_http=info
-# Railway injects PORT; 8080 is the local default.
-EXPOSE 8080
-CMD ["control-plane", "serve"]
+ENV RUST_LOG=info,tower_http=info
+EXPOSE 8090
+CMD ["mcp-fleet"]

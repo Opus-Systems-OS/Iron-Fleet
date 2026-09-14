@@ -1,0 +1,27 @@
+[package]
+name = "mcp-fleet"
+version = "0.1.0"
+description = "MCP server wrapping the control plane's jarvis-scoped surface: list_agents, start_session, get_session_status, send_event, interrupt_session"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "mcp-fleet"
+path = "src/main.rs"
+
+[dependencies]
+rmcp = { version = "3", features = ["schemars", "transport-streamable-http-server"] }
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tokio-util = "0.7"
+tower-http = { version = "0.7", features = ["trace"] }
+reqwest = { version = "0.13", features = ["json"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+subtle = "2"
+http = "1"

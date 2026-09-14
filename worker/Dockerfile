@@ -10,13 +10,22 @@ FROM rust:1-bookworm AS build
 WORKDIR /src
 
 COPY Cargo.toml Cargo.lock ./
+# Every workspace member's Cargo.toml has to be present for cargo to resolve
+# the workspace at all, even ones this image never builds — cargo checks
+# each member's [lib]/[[bin]] source paths exist while loading the manifest.
 COPY control-plane/Cargo.toml control-plane/Cargo.toml
 COPY worker/Cargo.toml worker/Cargo.toml
-RUN mkdir -p control-plane/src worker/src \
+COPY app/src-tauri/Cargo.toml app/src-tauri/Cargo.toml
+COPY mcp-fleet/Cargo.toml mcp-fleet/Cargo.toml
+RUN mkdir -p control-plane/src worker/src app/src-tauri/src mcp-fleet/src \
  && echo 'fn main() {}' > control-plane/src/main.rs \
  && echo 'fn main() {}' > worker/src/main.rs \
+ && echo 'fn main() {}' > app/src-tauri/src/main.rs \
+ && echo '' > app/src-tauri/src/lib.rs \
+ && echo 'fn main() {}' > mcp-fleet/src/main.rs \
  && cargo build --release -p worker \
- && rm -rf control-plane/src worker/src target/release/deps/worker-* target/release/deps/iron_fleet_worker-*
+ && rm -rf control-plane/src worker/src app/src-tauri/src mcp-fleet/src \
+           target/release/deps/worker-* target/release/deps/iron_fleet_worker-*
 
 COPY worker/src worker/src
 RUN cargo build --release -p worker

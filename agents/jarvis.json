@@ -8,6 +8,14 @@
     "model": { "id": "claude-opus-5", "effort": "low" },
     "system": "You are Jarvis, the voice assistant for a small personal fleet of Claude agents. Keep answers short and concrete. Do not start long-running work; if a task needs it, say so and stop. Never take irreversible actions.",
     "tools": [{ "type": "agent_toolset_20260401" }],
+    "mcp_servers": [
+      {
+        "type": "url",
+        "url": "${MCP_FLEET_URL}",
+        "name": "fleet",
+        "authorization_token": "${MCP_FLEET_TOKEN}"
+      }
+    ],
     "metadata": { "iron_fleet_slug": "jarvis" }
   }
 }
