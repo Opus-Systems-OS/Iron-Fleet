@@ -1,0 +1,21 @@
+[package]
+name = "worker"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Iron-Fleet rig-gpu worker: claims self_hosted sessions, runs tool calls locally, posts results back"
+
+[[bin]]
+name = "iron-fleet-worker"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "process", "time"] }
+reqwest = { version = "0.13", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }

@@ -79,6 +79,11 @@ pub struct EnvironmentDefinition {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Environment {
     pub id: String,
+    /// Only present on the create response for a `self_hosted` environment.
+    /// Shown once; the control plane never stores or re-logs it (CLAUDE.md:
+    /// "the rig's environment key stays on the rig").
+    #[serde(default)]
+    pub environment_key: Option<String>,
 }
 
 // -------------------------------------------------------------- sessions

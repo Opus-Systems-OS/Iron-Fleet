@@ -71,7 +71,8 @@ async fn run() -> error::Result<()> {
             dir = %cfg.agents_dir.display(),
             "registry loaded"
         );
-        registry::sync::sync(&reg, &api, &db).await?;
+        let report = registry::sync::sync(&reg, &api, &db).await?;
+        print_new_environment_keys(&report.new_environment_keys);
     }
     if matches!(cli.command, Some(Command::Sync)) {
         return Ok(());
@@ -100,6 +101,21 @@ async fn run() -> error::Result<()> {
         .await
         .map_err(|e| error::Error::Config(format!("server: {e}")))?;
     Ok(())
+}
+
+/// Printed with `eprintln!`, never `tracing`, so a self_hosted environment's
+/// key can't end up in an aggregated log sink. Shown exactly once, at the sync
+/// that provisions it — the control plane does not store it (CLAUDE.md: "the
+/// rig's environment key stays on the rig").
+fn print_new_environment_keys(keys: &[(String, String, String)]) {
+    for (slug, environment_id, key) in keys {
+        eprintln!(
+            "\n=== new self_hosted environment: {slug} ({environment_id}) ===\n\
+             This key is shown once and is not stored anywhere. Copy it onto the rig now:\n\
+             \n  RIG_ENVIRONMENT_ID={environment_id}\n  RIG_ENVIRONMENT_KEY={key}\n\n\
+             It will not be printed again; if it's lost, provisioning must be redone.\n"
+        );
+    }
 }
 
 fn sign_webhook(id: &str) -> error::Result<()> {

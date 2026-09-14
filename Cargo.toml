@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
-# CLAUDE.md lists worker, mcp-fleet and app/src-tauri as members too; they are
-# added when their build stage starts. Stage 1 is control-plane only.
-members = ["control-plane"]
+# CLAUDE.md lists mcp-fleet and app/src-tauri as members too; they are added
+# when their build stage starts. Stage 2 added worker/.
+members = ["control-plane", "worker"]
 
 [workspace.package]
 edition = "2021"

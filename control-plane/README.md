@@ -55,11 +55,17 @@ mean) with `upstream_status` and `request_id` for the support ticket.
 
 On boot (and on `control-plane sync`) the service reconciles this directory
 with Anthropic: unknown agents are created, changed ones (content hash) are
-updated into a new version, unchanged ones are left alone. Environments of
-type `cloud` are created once. `self_hosted` environments (`rig-gpu`) are
-recorded but **not** provisioned — that is stage 2, and the rig owns its key;
-`POST /sessions` for an agent whose environment is not provisioned returns
+updated into a new version, unchanged ones are left alone. Environments —
+`cloud` and `self_hosted` alike — are created once. `POST /sessions` for an
+agent whose environment has not been provisioned yet (i.e. the very first
+sync since the environment file was added) returns
 `409 environment_not_provisioned`.
+
+Provisioning a `self_hosted` environment (`rig-gpu`) returns an
+`environment_key` that the rig, not the control plane, needs — the rig owns
+its key (CLAUDE.md). Sync surfaces it exactly once via `eprintln!` (never
+`tracing`, so it can't land in an aggregated log sink) and never stores it;
+see `worker/README.md` for what to do with it.
 
 Two API facts that shape this:
 
@@ -135,9 +141,10 @@ The image runs as root: Railway volumes are root-owned and the platform's own
 fix for non-root images is `RAILWAY_RUN_UID=0`. Volumes are single-replica; do
 not scale this service horizontally (SQLite would not survive it anyway).
 
-## Not in stage 1
+## Not in this service
 
-Notification delivery (the webhook logs only), `rig-gpu` provisioning and the
-worker, any UI, `mcp-fleet`. Session state is never stored locally — the
-`session_usage` table is a cumulative usage snapshot per session, upserted
-from webhooks, for the Usage tab to aggregate later.
+Notification delivery (the webhook logs only), any UI, `mcp-fleet`. Session
+state is never stored locally — the `session_usage` table is a cumulative
+usage snapshot per session, upserted from webhooks, for the Usage tab to
+aggregate later. The `rig-gpu` worker itself lives in `worker/` and does not
+talk to this service — see its README.

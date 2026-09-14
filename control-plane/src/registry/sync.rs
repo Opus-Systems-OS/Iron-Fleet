@@ -1,7 +1,10 @@
 //! Reconcile `agents/` → Anthropic → SQLite. Idempotent; safe to run on every boot.
 //!
-//! - Environments: created once (cloud only in stage 1; `self_hosted` is recorded
-//!   with no ID and left for the worker stage, since the rig owns its key).
+//! - Environments: created once, `cloud` and `self_hosted` alike. A freshly
+//!   created `self_hosted` environment's `environment_key` is returned to the
+//!   caller in `SyncReport::new_environment_keys` instead of being stored —
+//!   the rig owns that key (CLAUDE.md) — so the caller can surface it exactly
+//!   once and the operator copies it into `RIG_ENVIRONMENT_KEY` on the rig.
 //! - Agents: created if unknown, updated (new version) if the definition hash
 //!   changed, otherwise untouched. Policy columns are refreshed every run.
 
@@ -14,10 +17,13 @@ use sha2::{Digest, Sha256};
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SyncReport {
     pub environments_created: usize,
-    pub environments_skipped: usize,
     pub agents_created: usize,
     pub agents_updated: usize,
     pub agents_unchanged: usize,
+    /// `(slug, environment_id, environment_key)` for each `self_hosted`
+    /// environment provisioned *this run*. The caller must print these once
+    /// and never pass them to `tracing` (they'd end up in aggregated logs).
+    pub new_environment_keys: Vec<(String, String, String)>,
 }
 
 pub async fn sync(reg: &Registry, api: &Client, db: &Db) -> Result<SyncReport> {
@@ -26,25 +32,31 @@ pub async fn sync(reg: &Registry, api: &Client, db: &Db) -> Result<SyncReport> {
     for (slug, file) in &reg.environments {
         let kind = file.kind()?;
         let existing = db.environment(slug)?;
-        match (kind, existing.and_then(|e| e.environment_id)) {
-            (_, Some(id)) => {
+        match existing.and_then(|e| e.environment_id) {
+            Some(id) => {
                 tracing::debug!(slug, id, kind, "environment already provisioned");
                 db.upsert_environment(slug, kind, Some(&id))?;
             }
-            ("cloud", None) => {
+            None => {
                 let env = api.create_environment(&file.environment).await?;
-                tracing::info!(slug, id = %env.id, "environment created");
+                tracing::info!(slug, id = %env.id, kind, "environment created");
                 db.upsert_environment(slug, kind, Some(&env.id))?;
                 report.environments_created += 1;
-            }
-            (other, None) => {
-                tracing::warn!(
-                    slug,
-                    kind = other,
-                    "environment not provisioned by the control plane in stage 1; sessions for it return 409"
-                );
-                db.upsert_environment(slug, kind, None)?;
-                report.environments_skipped += 1;
+                if kind == "self_hosted" {
+                    match &env.environment_key {
+                        Some(key) => report.new_environment_keys.push((
+                            slug.clone(),
+                            env.id.clone(),
+                            key.clone(),
+                        )),
+                        None => tracing::warn!(
+                            slug,
+                            id = %env.id,
+                            "self_hosted environment created but the API returned no environment_key; \
+                             the rig cannot authenticate as this environment until one is issued"
+                        ),
+                    }
+                }
             }
         }
     }

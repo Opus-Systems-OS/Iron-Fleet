@@ -11,7 +11,7 @@ const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS environments (
   slug          TEXT PRIMARY KEY,
   kind          TEXT NOT NULL,            -- "cloud" | "self_hosted"
-  anthropic_id  TEXT,                     -- NULL until provisioned (rig-gpu waits for stage 2)
+  anthropic_id  TEXT,                     -- NULL until provisioned by sync
   synced_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS agents (
