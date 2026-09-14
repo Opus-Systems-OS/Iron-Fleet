@@ -4,6 +4,13 @@ target
 .env.*
 **/*.db
 **/*.db-*
-app
-worker
-mcp-fleet
+# Not `app`, `worker`, `mcp-fleet` wholesale — every Dockerfile that builds a
+# single workspace member needs the *other* members' Cargo.toml files too,
+# for cargo to resolve the workspace at all (see each Dockerfile's comment).
+# Only their heavy, locally-generated, already-gitignored artifacts need
+# excluding from a local `docker build .`; Railway builds from a git
+# checkout, where these never existed in the first place.
+app/node_modules
+app/dist
+app/src-tauri/gen
+worker/work
