@@ -108,6 +108,26 @@ impl Client {
             .await
     }
 
+    // ---- vaults
+
+    pub async fn create_vault(&self, def: &VaultCreate) -> Result<Vault> {
+        self.send(Method::POST, "/v1/vaults", &[], Some(def)).await
+    }
+
+    pub async fn create_credential(
+        &self,
+        vault_id: &str,
+        def: &CredentialCreate,
+    ) -> Result<Credential> {
+        self.send(
+            Method::POST,
+            &format!("/v1/vaults/{vault_id}/credentials"),
+            &[],
+            Some(def),
+        )
+        .await
+    }
+
     // ---- sessions
 
     pub async fn create_session(&self, body: &SessionCreate) -> Result<Session> {

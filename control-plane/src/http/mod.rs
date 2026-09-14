@@ -26,6 +26,10 @@ pub struct AppState {
     pub seen_events: Arc<SeenEvents>,
     pub control_plane_token: Arc<String>,
     pub console_workspace: Arc<String>,
+    /// `Some` once `mcp_fleet::ensure_vault` has provisioned a vault —
+    /// attached to every session's `vault_ids` so an agent whose own
+    /// `mcp_servers` references that URL authenticates automatically.
+    pub mcp_fleet_vault_id: Arc<Option<String>>,
 }
 
 pub fn router(state: AppState) -> Router {

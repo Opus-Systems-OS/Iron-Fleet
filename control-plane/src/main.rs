@@ -6,6 +6,7 @@ mod config;
 mod db;
 mod error;
 mod http;
+mod mcp_fleet;
 mod money;
 mod registry;
 mod webhook;
@@ -74,6 +75,12 @@ async fn run() -> error::Result<()> {
         let report = registry::sync::sync(&reg, &api, &db).await?;
         print_new_environment_keys(&report.new_environment_keys);
     }
+
+    let mcp_fleet_vault_id = match (&cfg.mcp_fleet_url, &cfg.mcp_fleet_token) {
+        (Some(url), Some(token)) => Some(mcp_fleet::ensure_vault(&api, &db, url, token).await?),
+        _ => None,
+    };
+
     if matches!(cli.command, Some(Command::Sync)) {
         return Ok(());
     }
@@ -88,6 +95,7 @@ async fn run() -> error::Result<()> {
         seen_events: Arc::new(webhook::SeenEvents::new(10_000)),
         control_plane_token: Arc::new(cfg.control_plane_token.clone()),
         console_workspace: Arc::new(cfg.anthropic_workspace.clone()),
+        mcp_fleet_vault_id: Arc::new(mcp_fleet_vault_id),
     };
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], cfg.port));

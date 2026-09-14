@@ -39,32 +39,46 @@ jarvis sees a message it can react to, not a crashed connection.
   own token. Deliberately separate: holding this token only proves "I can
   use the five jarvis tools," never "I can call the control plane directly."
 
-## Wiring it to jarvis — not done yet, and here's why
+## Wiring it to jarvis
 
-`agents/jarvis.json` does **not** reference this server yet. The first
-attempt did, shaped like Anthropic's public Messages API MCP connector:
+The first attempt at this guessed a shape modeled on Anthropic's public
+Messages API MCP connector — `authorization_token` inline on the
+`mcp_servers` entry — and the live Managed Agents API rejected it outright:
+`400 invalid_request_error: Failed to parse request body: unknown field
+"authorization_token"`. The real shape, confirmed from
+`platform.claude.com/docs/en/managed-agents/mcp-connector` and
+`.../vaults`, splits declaration from authentication across two different
+places:
+
+**Agent creation** (`agents/jarvis.json`) only declares *which* server, by
+name and URL — no credential:
 
 ```json
+"tools": [
+  { "type": "agent_toolset_20260401" },
+  { "type": "mcp_toolset", "mcp_server_name": "fleet" }
+],
 "mcp_servers": [
-  { "type": "url", "url": "${MCP_FLEET_URL}", "name": "fleet", "authorization_token": "${MCP_FLEET_TOKEN}" }
+  { "type": "url", "name": "fleet", "url": "${MCP_FLEET_URL}" }
 ]
 ```
 
-That shape was the closest confirmed real-world precedent available, but it
-was a guess for the Managed Agents `POST /v1/agents` body specifically (as
-opposed to a single Messages API call), and the live API rejected it outright
-the moment this deployed: `400 invalid_request_error: Failed to parse
-request body: unknown field "authorization_token"`. Pulled back out rather
-than left guessing against production a second time.
+Both the `mcp_servers` entry and the matching `mcp_toolset` tools entry are
+required together — Anthropic rejects an agent with either one alone
+("unreferenced servers or dangling toolsets").
 
-To re-wire it correctly: find out the real field name for a bearer token on
-an `mcp_servers` entry (or the right shape entirely) — from Anthropic's
-actual Managed Agents docs, not by inference from a different endpoint —
-then put the block above back in `agents/jarvis.json` with that shape.
-`registry::substitute_env_vars` (`control-plane/src/registry/mod.rs`) is
-already there and tested, ready to expand `${MCP_FLEET_URL}` /
-`${MCP_FLEET_TOKEN}` again once the shape's right; nothing else needs to
-change for that half of it.
+**Session creation** supplies the credential, via a vault referenced by
+`vault_ids` — never embedded in the agent definition. `control-plane`
+handles this in `src/mcp_fleet.rs`: `ensure_vault` provisions (once, and
+only when both `MCP_FLEET_URL` and `MCP_FLEET_TOKEN` are set) a vault and a
+`static_bearer` credential keyed to `MCP_FLEET_URL`, and every
+`POST /sessions` attaches that vault's id. Anthropic matches the credential
+to the server by URL at runtime — the `mcp_server_name`/`name` fields never
+enter into authentication at all.
+
+`registry::substitute_env_vars` (`control-plane/src/registry/mod.rs`)
+expands `${MCP_FLEET_URL}` in the committed `agents/jarvis.json`, so the
+real URL is never committed either.
 
 ## Local run
 
@@ -78,6 +92,7 @@ worth repeating if you touch `server.rs`:
 python3 control-plane/dev/mock-managed-agents.py 9999
 ANTHROPIC_BASE_URL=http://127.0.0.1:9999 ANTHROPIC_API_KEY=test \
   ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_test CONTROL_PLANE_TOKEN=dev \
+  MCP_FLEET_URL=http://127.0.0.1:8090/mcp MCP_FLEET_TOKEN=dev-mcp-token \
   cargo run -p control-plane -- serve
 # 3. mcp-fleet itself
 CONTROL_PLANE_URL=http://127.0.0.1:8080 CONTROL_PLANE_TOKEN=dev \

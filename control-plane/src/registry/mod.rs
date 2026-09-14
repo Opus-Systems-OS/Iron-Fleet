@@ -208,6 +208,13 @@ mod tests {
 
     #[test]
     fn committed_fleet_loads_and_matches_claude_md() {
+        // jarvis.json references ${MCP_FLEET_URL} so the real value never
+        // gets committed. No other test reads this name, so setting it here
+        // doesn't race parallel test execution.
+        unsafe {
+            std::env::set_var("MCP_FLEET_URL", "https://mcp-fleet.internal.example/mcp");
+        }
+
         let reg = load_dir(&repo_agents_dir()).unwrap();
         let cap = |s: &str| reg.agents[s].policy.max_list_cost_cents.get();
         let effort = |s: &str| reg.agents[s].agent.model.effort.unwrap().as_str();
@@ -228,6 +235,29 @@ mod tests {
             reg.agents["jarvis"].agent.metadata[SLUG_METADATA_KEY],
             "jarvis"
         );
+
+        // mcp_servers and its matching mcp_toolset entry must be mutually
+        // consistent, per docs.claude.com/managed-agents/mcp-connector: "The
+        // API rejects agent definitions with unreferenced servers or
+        // dangling toolsets."
+        let mcp_servers = &reg.agents["jarvis"].agent.mcp_servers;
+        assert_eq!(mcp_servers.len(), 1);
+        assert_eq!(mcp_servers[0]["name"], "fleet");
+        assert_eq!(
+            mcp_servers[0]["url"],
+            "https://mcp-fleet.internal.example/mcp"
+        );
+        assert!(
+            mcp_servers[0].get("authorization_token").is_none(),
+            "auth is a session-time vault_ids concern, not an agent-level field"
+        );
+        let toolset = reg.agents["jarvis"]
+            .agent
+            .tools
+            .iter()
+            .find(|t| t["type"] == "mcp_toolset")
+            .expect("jarvis declares a matching mcp_toolset entry");
+        assert_eq!(toolset["mcp_server_name"], "fleet");
     }
 
     #[test]

@@ -91,6 +91,10 @@ pub async fn create(
             ("iron_fleet_agent".to_owned(), agent.slug.clone()),
             ("iron_fleet_environment".to_owned(), env_slug.clone()),
         ]),
+        // Harmless on an agent with no mcp_servers entry: a vault credential
+        // only applies to a server the agent's own definition references, by
+        // URL, at runtime — see docs.claude.com/managed-agents/vaults.
+        vault_ids: state.mcp_fleet_vault_id.iter().cloned().collect(),
     };
 
     let session = state.api.create_session(&body).await?;

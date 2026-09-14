@@ -16,6 +16,12 @@ pub struct Config {
     pub database_path: PathBuf,
     pub agents_dir: PathBuf,
     pub sync_on_boot: bool,
+    /// Both or neither: if set, control-plane provisions (once) a vault +
+    /// `static_bearer` credential for `mcp-fleet` and attaches it to every
+    /// session. Unset by default — jarvis's `mcp_servers` entry works
+    /// unauthenticated (or isn't wired up at all) until these are set.
+    pub mcp_fleet_url: Option<String>,
+    pub mcp_fleet_token: Option<String>,
 }
 
 impl Config {
@@ -91,6 +97,8 @@ impl Config {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("agents")),
             sync_on_boot,
+            mcp_fleet_url: optional("MCP_FLEET_URL"),
+            mcp_fleet_token: optional("MCP_FLEET_TOKEN"),
         })
     }
 }

@@ -34,6 +34,8 @@ mean) with `upstream_status` and `request_id` for the support ticket.
 | `ANTHROPIC_API_KEY` | yes | |
 | `ANTHROPIC_WEBHOOK_SIGNING_KEY` | yes | The `whsec_…` value shown once when the endpoint is created in Console → Manage → Webhooks. |
 | `CONTROL_PLANE_TOKEN` | yes | Bearer token for the control plane's own API. `openssl rand -hex 32`. |
+| `MCP_FLEET_URL` | yes | `agents/jarvis.json` references `${MCP_FLEET_URL}` unconditionally (registry load fails without it) — any reachable-looking URL works if `mcp-fleet` isn't deployed yet, since Anthropic doesn't validate reachability at agent-create time. |
+| `MCP_FLEET_TOKEN` | no | Independent of the URL. When also set, provisions (once) a vault + `static_bearer` credential authenticating `mcp-fleet` and attaches it to every session's `vault_ids`. Without it, `mcp-fleet` connections are attempted unauthenticated. See `mcp-fleet/README.md`. |
 | `PORT` | no | Railway injects it. Default `8080`. |
 | `DATABASE_PATH` | no | Default `$RAILWAY_VOLUME_MOUNT_PATH/control-plane.db`, else `./control-plane.db`. |
 | `AGENTS_DIR` | no | Default `./agents`; `/app/agents` in the image. |
@@ -58,15 +60,19 @@ mean) with `upstream_status` and `request_id` for the support ticket.
 `agents/environments/<slug>.json` holds `{ "slug", "environment": { verbatim POST /v1/environments body } }`.
 
 A file may reference `${VAR_NAME}`, expanded from `control-plane`'s own
-process environment before the JSON is parsed — meant for wiring a secret
-(an MCP server's bearer token, say) into a committed file without ever
-committing the value itself. Not in active use yet: `agents/jarvis.json`
-doesn't reference `mcp-fleet` for now (see `mcp-fleet/README.md` — the real
-Managed Agents `mcp_servers` request shape needs confirming against a live
-run before that's safe to wire back in). This runs on raw text, so a
-substituted value can't itself contain a character that needs JSON escaping
-(`"`, backslash, control characters) — fine for tokens and URLs, not a
-general templating engine.
+process environment before the JSON is parsed — how `agents/jarvis.json`
+points at `mcp-fleet`'s URL without committing it. This runs on raw text, so
+a substituted value can't itself contain a character that needs JSON
+escaping (`"`, backslash, control characters) — fine for tokens and URLs,
+not a general templating engine.
+
+`agents/jarvis.json` declares `mcp-fleet` as an `mcp_servers` entry plus a
+matching `tools[type=mcp_toolset]` entry — both are required together, or
+Anthropic rejects the agent (see `mcp-fleet/README.md`'s "Wiring it to
+jarvis" for the exact shape and why the first attempt at this was wrong).
+Authentication is a separate, session-time concern handled by
+`mcp_fleet::ensure_vault` (`src/mcp_fleet.rs`), not anything in this
+registry file.
 
 On boot (and on `control-plane sync`) the service reconciles this directory
 with Anthropic: unknown agents are created, changed ones (content hash) are
@@ -81,6 +87,20 @@ Provisioning a `self_hosted` environment (`rig-gpu`) returns an
 its key (CLAUDE.md). Sync surfaces it exactly once via `eprintln!` (never
 `tracing`, so it can't land in an aggregated log sink) and never stores it;
 see `worker/README.md` for what to do with it.
+
+## The mcp-fleet vault
+
+Separate from registry sync, and gated on `MCP_FLEET_URL`/`MCP_FLEET_TOKEN`
+both being set: on every boot, `mcp_fleet::ensure_vault` provisions (once —
+the `mcp_fleet_vault` table makes it idempotent across restarts) a vault and
+a `static_bearer` credential keyed to `MCP_FLEET_URL`, then that vault's id
+rides on `vault_ids` in every `POST /v1/sessions` request. Vault credentials
+apply only to agents whose own `mcp_servers` references the matching URL, so
+attaching it broadly is harmless for agents that don't use `mcp-fleet`. If
+`MCP_FLEET_URL` ever changes, the old credential can't be edited in place
+(its key is immutable) — `ensure_vault` logs a warning and keeps the old
+vault rather than guess at fixing it; archiving the stale credential and
+clearing the `mcp_fleet_vault` row is a manual step.
 
 Two API facts that shape this:
 
@@ -97,6 +117,7 @@ Two API facts that shape this:
 export ANTHROPIC_API_KEY=sk-ant-…
 export ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_…      # any valid whsec_ works locally
 export CONTROL_PLANE_TOKEN=dev
+export MCP_FLEET_URL=https://mcp-fleet.example.invalid/mcp   # jarvis.json needs this to load; see above
 cargo run -p control-plane                          # boot sync, then listen on :8080
 
 curl -H 'Authorization: Bearer dev' localhost:8080/agents

@@ -195,6 +195,48 @@ pub struct SessionCreate {
     pub initial_events: Vec<UserMessageEvent>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
+    /// Vault ids to authenticate this session's MCP servers with — matched to
+    /// an agent's `mcp_servers` entries by URL at runtime, not by name.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub vault_ids: Vec<String>,
+}
+
+// ---------------------------------------------------------------- vaults
+
+/// Body of `POST /v1/vaults`.
+#[derive(Debug, Clone, Serialize)]
+pub struct VaultCreate {
+    pub display_name: String,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Vault {
+    pub id: String,
+}
+
+/// A credential's `auth` object. Only `static_bearer` is implemented — the
+/// one shape `mcp-fleet` needs (a fixed bearer token, not OAuth).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CredentialAuth {
+    StaticBearer {
+        mcp_server_url: String,
+        token: String,
+    },
+}
+
+/// Body of `POST /v1/vaults/{vault_id}/credentials`.
+#[derive(Debug, Clone, Serialize)]
+pub struct CredentialCreate {
+    pub display_name: String,
+    pub auth: CredentialAuth,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Credential {
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -249,8 +291,10 @@ mod tests {
             budget: Budget::limit("50".parse().unwrap()),
             initial_events: vec![UserMessageEvent::text("hi")],
             metadata: BTreeMap::from([("iron_fleet_agent".into(), "jarvis".into())]),
+            vault_ids: vec![],
         };
         let v = serde_json::to_value(&body).unwrap();
+        assert!(v.get("vault_ids").is_none(), "empty vault_ids is omitted");
         assert_eq!(
             v["agent"],
             serde_json::json!({"type": "agent", "id": "agent_1", "version": 3})
@@ -264,6 +308,43 @@ mod tests {
         assert_eq!(v["initial_events"][0]["type"], "user.message");
         assert_eq!(v["initial_events"][0]["content"][0]["text"], "hi");
         assert_eq!(v["metadata"]["iron_fleet_agent"], "jarvis");
+    }
+
+    #[test]
+    fn session_create_includes_nonempty_vault_ids() {
+        let body = SessionCreate {
+            agent: AgentRef::pinned("agent_1", 3),
+            environment_id: "env_1".into(),
+            title: None,
+            budget: Budget::limit("50".parse().unwrap()),
+            initial_events: vec![UserMessageEvent::text("hi")],
+            metadata: BTreeMap::new(),
+            vault_ids: vec!["vlt_1".into()],
+        };
+        let v = serde_json::to_value(&body).unwrap();
+        assert_eq!(v["vault_ids"], serde_json::json!(["vlt_1"]));
+    }
+
+    /// Matches docs.claude.com/managed-agents/vaults's static_bearer example
+    /// verbatim: `{"type": "static_bearer", "mcp_server_url": ..., "token": ...}`.
+    #[test]
+    fn static_bearer_credential_matches_documented_shape() {
+        let body = CredentialCreate {
+            display_name: "Iron-Fleet MCP".into(),
+            auth: CredentialAuth::StaticBearer {
+                mcp_server_url: "https://mcp-fleet.example/mcp".into(),
+                token: "secret".into(),
+            },
+        };
+        let v = serde_json::to_value(&body).unwrap();
+        assert_eq!(
+            v["auth"],
+            serde_json::json!({
+                "type": "static_bearer",
+                "mcp_server_url": "https://mcp-fleet.example/mcp",
+                "token": "secret",
+            })
+        );
     }
 
     #[test]

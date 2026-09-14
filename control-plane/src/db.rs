@@ -36,6 +36,16 @@ CREATE TABLE IF NOT EXISTS session_usage (
   last_event_type   TEXT,
   observed_at       TEXT NOT NULL
 );
+-- Singleton: the one vault holding the mcp-fleet static_bearer credential,
+-- provisioned once (unlike agents/environments, vault creation has no
+-- dedupe key of its own — this row is what makes it idempotent).
+CREATE TABLE IF NOT EXISTS mcp_fleet_vault (
+  id             INTEGER PRIMARY KEY CHECK (id = 1),
+  vault_id       TEXT NOT NULL,
+  credential_id  TEXT NOT NULL,
+  mcp_server_url TEXT NOT NULL,
+  synced_at      TEXT NOT NULL
+);
 "#;
 
 #[derive(Clone)]
@@ -84,6 +94,12 @@ pub struct AgentUsageRow {
     pub session_count: u64,
     pub total_list_cost_cents: u64,
     pub budget_reached_count: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct McpFleetVaultRow {
+    pub vault_id: String,
+    pub mcp_server_url: String,
 }
 
 #[derive(Debug, Clone)]
@@ -297,6 +313,47 @@ impl Db {
             rows.collect()
         })
     }
+
+    // ---- mcp-fleet vault
+
+    /// `credential_id` and `synced_at` are stored (for a human inspecting the
+    /// database directly) but not read back here — nothing needs them yet.
+    pub fn mcp_fleet_vault(&self) -> Result<Option<McpFleetVaultRow>> {
+        self.with(|c| {
+            c.query_row(
+                "SELECT vault_id, mcp_server_url FROM mcp_fleet_vault WHERE id = 1",
+                [],
+                |r| {
+                    Ok(McpFleetVaultRow {
+                        vault_id: r.get(0)?,
+                        mcp_server_url: r.get(1)?,
+                    })
+                },
+            )
+            .optional()
+        })
+    }
+
+    pub fn set_mcp_fleet_vault(
+        &self,
+        vault_id: &str,
+        credential_id: &str,
+        mcp_server_url: &str,
+    ) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO mcp_fleet_vault (id, vault_id, credential_id, mcp_server_url, synced_at)
+                 VALUES (1, ?1, ?2, ?3, ?4)
+                 ON CONFLICT(id) DO UPDATE SET
+                   vault_id = excluded.vault_id,
+                   credential_id = excluded.credential_id,
+                   mcp_server_url = excluded.mcp_server_url,
+                   synced_at = excluded.synced_at",
+                params![vault_id, credential_id, mcp_server_url, now()],
+            )?;
+            Ok(())
+        })
+    }
 }
 
 const AGENT_SELECT: &str = "SELECT slug, anthropic_id, anthropic_version, definition_sha256,
@@ -463,5 +520,23 @@ mod tests {
             "most recently observed first"
         );
         assert_eq!(recent[0].list_cost_cents.unwrap().get(), 300);
+    }
+
+    #[test]
+    fn mcp_fleet_vault_round_trips_and_upserts() {
+        let db = Db::in_memory().unwrap();
+        assert!(db.mcp_fleet_vault().unwrap().is_none());
+
+        db.set_mcp_fleet_vault("vlt_1", "vcrd_1", "https://mcp-fleet.example/mcp")
+            .unwrap();
+        let row = db.mcp_fleet_vault().unwrap().unwrap();
+        assert_eq!(row.vault_id, "vlt_1");
+        assert_eq!(row.mcp_server_url, "https://mcp-fleet.example/mcp");
+
+        // A second call (e.g. next boot) overwrites the single row rather than
+        // erroring or duplicating it.
+        db.set_mcp_fleet_vault("vlt_2", "vcrd_2", "https://mcp-fleet.example/mcp")
+            .unwrap();
+        assert_eq!(db.mcp_fleet_vault().unwrap().unwrap().vault_id, "vlt_2");
     }
 }
