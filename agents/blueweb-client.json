@@ -35,7 +35,11 @@
     ],
     "tools": [
       { "type": "agent_toolset_20260401" },
-      { "type": "mcp_toolset", "mcp_server_name": "github" }
+      {
+        "type": "mcp_toolset",
+        "mcp_server_name": "github",
+        "default_config": { "permission_policy": { "type": "always_allow" } }
+      }
     ],
     "skills": [{ "type": "custom", "skill": "blueweb-customer-site" }],
     "metadata": { "iron_fleet_slug": "blueweb-client" }

@@ -163,6 +163,16 @@ in-place credential update on the next sync. Two kinds:
 
 Cloud sandboxes only; `gpu-compute` cannot use these.
 
+**MCP toolsets must carry an explicit permission policy.** Anthropic's default
+for `mcp_toolset` is `always_ask`, which pauses the session
+(`stop_reason: requires_action`) until a client sends a
+`user.tool_confirmation` — and nothing in this fleet does, so a toolset
+without `default_config.permission_policy` is a session that silently hangs
+on its first MCP call. Registry load rejects it. `always_allow` is the only
+policy that never stalls (`auto` can still pause on "indeterminate"); the
+spend guard is the per-session cap, not a human click. A confirmation loop
+in the Fleet Dashboard is the feature that would relax this.
+
 **`github`** → every session of the agent mounts the `mount` repos as
 `github_repository` resources under `/workspace/<repo>`, authenticated with
 the token in `token_env` (read per request, never stored — `agent_github`

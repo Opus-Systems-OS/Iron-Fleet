@@ -212,6 +212,9 @@ pub fn load_dir(dir: &Path) -> Result<Registry> {
         if let Err(reason) = check_credentials(&file.credentials, &file.agent.mcp_servers) {
             return Err(Error::Registry { path, reason });
         }
+        if let Err(reason) = check_mcp_toolset_policies(&file.agent.tools) {
+            return Err(Error::Registry { path, reason });
+        }
         if let Some(gh) = &file.github {
             if let Err(reason) = check_github(gh) {
                 return Err(Error::Registry { path, reason });
@@ -329,6 +332,42 @@ fn check_credentials(
                         "credentials: static_bearer for `{mcp_server_url}` matches no agent.mcp_servers url"
                     ));
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// MCP toolsets default to `always_ask` on Anthropic's side, which pauses the
+/// session (`stop_reason: requires_action`) until a client sends a
+/// `user.tool_confirmation` — and nothing in this fleet does, so an
+/// unconfigured MCP toolset is a session that silently hangs on its first
+/// MCP call (found the hard way, 2026-09-14). Require the policy to be
+/// spelled out; `always_allow` is the only one that never stalls until a
+/// confirmation loop exists.
+fn check_mcp_toolset_policies(tools: &[Value]) -> std::result::Result<(), String> {
+    for t in tools {
+        if t.get("type").and_then(Value::as_str) != Some("mcp_toolset") {
+            continue;
+        }
+        let name = t
+            .get("mcp_server_name")
+            .and_then(Value::as_str)
+            .unwrap_or("?");
+        let policy = t
+            .pointer("/default_config/permission_policy/type")
+            .and_then(Value::as_str);
+        match policy {
+            Some("always_allow") | Some("auto") => {}
+            Some(other) => {
+                return Err(format!(
+                    "tools: mcp_toolset `{name}` policy `{other}` would pause sessions; nothing in the fleet answers tool confirmations"
+                ))
+            }
+            None => {
+                return Err(format!(
+                    "tools: mcp_toolset `{name}` needs default_config.permission_policy (the platform default, always_ask, pauses sessions forever here)"
+                ))
             }
         }
     }
@@ -811,6 +850,21 @@ mod tests {
         assert!(check_credentials(&[spec("A", &many)], none).is_err());
         let err = check_credentials(&[spec("A", &["https://api.github.com/"])], none).unwrap_err();
         assert!(err.contains("bare hostname"), "{err}");
+
+        // An MCP toolset must say how its calls are permitted.
+        let ts = |policy: Option<&str>| {
+            let mut t = serde_json::json!({"type":"mcp_toolset","mcp_server_name":"github"});
+            if let Some(p) = policy {
+                t["default_config"] = serde_json::json!({"permission_policy": {"type": p}});
+            }
+            vec![serde_json::json!({"type":"agent_toolset_20260401"}), t]
+        };
+        assert!(check_mcp_toolset_policies(&ts(Some("always_allow"))).is_ok());
+        assert!(check_mcp_toolset_policies(&ts(Some("auto"))).is_ok());
+        let err = check_mcp_toolset_policies(&ts(None)).unwrap_err();
+        assert!(err.contains("always_ask"), "{err}");
+        let err = check_mcp_toolset_policies(&ts(Some("always_ask"))).unwrap_err();
+        assert!(err.contains("would pause"), "{err}");
 
         // A bearer credential must point at a server the agent actually declares.
         let bearer = CredentialSpec::StaticBearer {
