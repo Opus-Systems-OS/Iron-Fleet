@@ -45,18 +45,49 @@ pub struct AgentFile {
     pub agent: AgentDefinition,
 }
 
-/// One `environment_variable` vault credential. The secret itself is **not**
-/// in this file: `from_env` names the control-plane env var that holds it,
-/// read at sync time — never via `${VAR}` text substitution, which would put
-/// the value inside this `Debug`-derived struct.
+/// One vault credential. The secret itself is **not** in this file:
+/// `from_env` names the control-plane env var that holds it, read at sync
+/// time — never via `${VAR}` text substitution, which would put the value
+/// inside this `Debug`-derived struct.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CredentialSpec {
-    /// The environment variable the sandbox sees, e.g. `GH_TOKEN`.
-    pub secret_name: String,
-    pub from_env: String,
-    /// Hosts the real value is substituted on (bare hostnames or `*.` wildcards).
-    pub allowed_hosts: Vec<String>,
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CredentialSpec {
+    /// An env var in the sandbox whose real value is substituted at egress,
+    /// in request headers only, on `allowed_hosts` only. Right for CLIs that
+    /// send the token verbatim (`gh`, `wrangler`); useless for git-over-HTTPS,
+    /// which GitHub only accepts as base64 Basic auth.
+    EnvironmentVariable {
+        /// The environment variable the sandbox sees, e.g. `GH_TOKEN`.
+        secret_name: String,
+        from_env: String,
+        /// Bare hostnames or `*.` wildcards.
+        allowed_hosts: Vec<String>,
+    },
+    /// A bearer token for one of the agent's `mcp_servers`, injected when the
+    /// session connects to that exact URL. This is how the agent pushes to
+    /// GitHub: through the GitHub MCP server, not `git push`.
+    StaticBearer {
+        mcp_server_url: String,
+        from_env: String,
+    },
+}
+
+impl CredentialSpec {
+    /// The immutable key Anthropic dedupes on within a vault (`secret_name`
+    /// or `mcp_server_url`); also this credential's key in `agent_credentials`.
+    pub fn key(&self) -> &str {
+        match self {
+            CredentialSpec::EnvironmentVariable { secret_name, .. } => secret_name,
+            CredentialSpec::StaticBearer { mcp_server_url, .. } => mcp_server_url,
+        }
+    }
+
+    pub fn env_var(&self) -> &str {
+        match self {
+            CredentialSpec::EnvironmentVariable { from_env, .. }
+            | CredentialSpec::StaticBearer { from_env, .. } => from_env,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -178,7 +209,7 @@ pub fn load_dir(dir: &Path) -> Result<Registry> {
                 }
             }
         }
-        if let Err(reason) = check_credentials(&file.credentials) {
+        if let Err(reason) = check_credentials(&file.credentials, &file.agent.mcp_servers) {
             return Err(Error::Registry { path, reason });
         }
         if let Some(gh) = &file.github {
@@ -239,53 +270,66 @@ fn json_files(dir: &Path) -> Result<Vec<PathBuf>> {
 
 /// Limits from platform.claude.com/docs/managed-agents/vaults: 20 credentials
 /// per vault, 16 hosts per credential, `secret_name` unique within a vault.
-fn check_credentials(specs: &[CredentialSpec]) -> std::result::Result<(), String> {
+fn check_credentials(
+    specs: &[CredentialSpec],
+    mcp_servers: &[Value],
+) -> std::result::Result<(), String> {
     if specs.len() > 20 {
         return Err("credentials: at most 20 per agent (one vault)".into());
     }
     let mut seen = std::collections::BTreeSet::new();
     for c in specs {
-        let name_ok = c
-            .secret_name
-            .bytes()
-            .next()
-            .is_some_and(|b| b.is_ascii_uppercase())
-            && c.secret_name
-                .bytes()
-                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
-        if !name_ok {
-            return Err(format!(
-                "credentials: secret_name `{}` must look like an environment variable (A-Z, 0-9, _)",
-                c.secret_name
-            ));
+        if !seen.insert(c.key()) {
+            return Err(format!("credentials: duplicate key `{}`", c.key()));
         }
-        if !seen.insert(c.secret_name.as_str()) {
-            return Err(format!(
-                "credentials: duplicate secret_name `{}`",
-                c.secret_name
-            ));
+        if c.env_var().is_empty() {
+            return Err(format!("credentials: `{}` has an empty from_env", c.key()));
         }
-        if c.from_env.is_empty() {
-            return Err(format!(
-                "credentials: `{}` has an empty from_env",
-                c.secret_name
-            ));
-        }
-        if c.allowed_hosts.is_empty() || c.allowed_hosts.len() > 16 {
-            return Err(format!(
-                "credentials: `{}` needs 1-16 allowed_hosts",
-                c.secret_name
-            ));
-        }
-        if let Some(bad) = c
-            .allowed_hosts
-            .iter()
-            .find(|h| h.contains("://") || h.contains('/') || h.contains(':'))
-        {
-            return Err(format!(
-                "credentials: `{}` allowed_hosts entry `{bad}` must be a bare hostname",
-                c.secret_name
-            ));
+        match c {
+            CredentialSpec::EnvironmentVariable {
+                secret_name,
+                allowed_hosts,
+                ..
+            } => {
+                let name_ok = secret_name
+                    .bytes()
+                    .next()
+                    .is_some_and(|b| b.is_ascii_uppercase())
+                    && secret_name
+                        .bytes()
+                        .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
+                if !name_ok {
+                    return Err(format!(
+                        "credentials: secret_name `{secret_name}` must look like an environment variable (A-Z, 0-9, _)"
+                    ));
+                }
+                if allowed_hosts.is_empty() || allowed_hosts.len() > 16 {
+                    return Err(format!(
+                        "credentials: `{secret_name}` needs 1-16 allowed_hosts"
+                    ));
+                }
+                if let Some(bad) = allowed_hosts
+                    .iter()
+                    .find(|h| h.contains("://") || h.contains('/') || h.contains(':'))
+                {
+                    return Err(format!(
+                        "credentials: `{secret_name}` allowed_hosts entry `{bad}` must be a bare hostname"
+                    ));
+                }
+            }
+            CredentialSpec::StaticBearer { mcp_server_url, .. } => {
+                // A bearer credential only ever applies to a server the agent's
+                // own definition references, by exact URL; one that matches
+                // nothing is a typo, not a spare.
+                let declared = mcp_servers
+                    .iter()
+                    .any(|s| s.get("url").and_then(Value::as_str) == Some(mcp_server_url));
+                if !declared {
+                    return Err(format!(
+                        "credentials: static_bearer for `{mcp_server_url}` matches no agent.mcp_servers url"
+                    ));
+                }
+            }
         }
     }
     Ok(())
@@ -697,12 +741,27 @@ mod tests {
         }
         let reg = load_dir(&repo_agents_dir()).unwrap();
         let bw = &reg.agents["blueweb-client"];
-        let names: Vec<&str> = bw
-            .credentials
+        let keys: Vec<&str> = bw.credentials.iter().map(|c| c.key()).collect();
+        assert_eq!(
+            keys,
+            [
+                "GH_TOKEN",
+                "CLOUDFLARE_API_TOKEN",
+                "https://api.githubcopilot.com/mcp/"
+            ]
+        );
+        // The GitHub MCP server is how it pushes (GitHub's git endpoint only
+        // takes Basic auth, which a vault placeholder can't survive), so the
+        // server, its toolset, and its bearer credential must all be present.
+        assert_eq!(
+            bw.agent.mcp_servers[0]["url"],
+            "https://api.githubcopilot.com/mcp/"
+        );
+        assert!(bw
+            .agent
+            .tools
             .iter()
-            .map(|c| c.secret_name.as_str())
-            .collect();
-        assert_eq!(names, ["GH_TOKEN", "CLOUDFLARE_API_TOKEN"]);
+            .any(|t| t["type"] == "mcp_toolset" && t["mcp_server_name"] == "github"));
         let gh = bw
             .github
             .as_ref()
@@ -735,22 +794,35 @@ mod tests {
 
     #[test]
     fn credentials_and_github_blocks_are_validated() {
-        let spec = |name: &str, hosts: &[&str]| CredentialSpec {
+        let spec = |name: &str, hosts: &[&str]| CredentialSpec::EnvironmentVariable {
             secret_name: name.into(),
             from_env: "X".into(),
             allowed_hosts: hosts.iter().map(|s| s.to_string()).collect(),
         };
-        assert!(check_credentials(&[spec("GH_TOKEN", &["api.github.com"])]).is_ok());
-        let err = check_credentials(&[spec("gh-token", &["api.github.com"])]).unwrap_err();
+        let none: &[Value] = &[];
+        assert!(check_credentials(&[spec("GH_TOKEN", &["api.github.com"])], none).is_ok());
+        let err = check_credentials(&[spec("gh-token", &["api.github.com"])], none).unwrap_err();
         assert!(err.contains("environment variable"), "{err}");
-        let err = check_credentials(&[spec("A", &["h"]), spec("A", &["h"])]).unwrap_err();
+        let err = check_credentials(&[spec("A", &["h"]), spec("A", &["h"])], none).unwrap_err();
         assert!(err.contains("duplicate"), "{err}");
-        let err = check_credentials(&[spec("A", &[])]).unwrap_err();
+        let err = check_credentials(&[spec("A", &[])], none).unwrap_err();
         assert!(err.contains("1-16 allowed_hosts"), "{err}");
         let many: Vec<&str> = vec!["h"; 17];
-        assert!(check_credentials(&[spec("A", &many)]).is_err());
-        let err = check_credentials(&[spec("A", &["https://api.github.com/"])]).unwrap_err();
+        assert!(check_credentials(&[spec("A", &many)], none).is_err());
+        let err = check_credentials(&[spec("A", &["https://api.github.com/"])], none).unwrap_err();
         assert!(err.contains("bare hostname"), "{err}");
+
+        // A bearer credential must point at a server the agent actually declares.
+        let bearer = CredentialSpec::StaticBearer {
+            mcp_server_url: "https://api.githubcopilot.com/mcp/".into(),
+            from_env: "X".into(),
+        };
+        let err = check_credentials(std::slice::from_ref(&bearer), none).unwrap_err();
+        assert!(err.contains("matches no agent.mcp_servers"), "{err}");
+        let servers = [
+            serde_json::json!({"type":"url","name":"github","url":"https://api.githubcopilot.com/mcp/"}),
+        ];
+        assert!(check_credentials(std::slice::from_ref(&bearer), &servers).is_ok());
 
         assert!(is_github_repo_url("https://github.com/Opus1247/Iron-Fleet"));
         for bad in [
@@ -773,7 +845,7 @@ mod tests {
         let bad: std::result::Result<AgentFile, _> = serde_json::from_str(
             r#"{"slug":"x","default_environment":"cloud-default",
                 "policy":{"max_list_cost_cents":"5"},
-                "credentials":[{"secret_name":"A","from_env":"B","allowed_hosts":["h"],"secret_value":"nope"}],
+                "credentials":[{"type":"environment_variable","secret_name":"A","from_env":"B","allowed_hosts":["h"],"secret_value":"nope"}],
                 "agent":{"name":"x","model":{"id":"claude-opus-5"}}}"#,
         );
         assert!(

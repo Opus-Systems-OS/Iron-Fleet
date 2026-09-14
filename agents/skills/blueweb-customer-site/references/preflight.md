@@ -16,19 +16,26 @@ laptop. Everything below still applies, with four differences:
   stand-in; the real secret is substituted at the network edge, and only in
   request *headers* to `github.com` / `api.github.com` / `api.cloudflare.com`.
   Never echo, paste, or write them into a file — they are useless anywhere else.
-- **`gh repo create --push` fails on the push half.** `git` sends the token as
-  HTTP Basic auth, which base64-encodes it, so the placeholder is never
-  substituted. Create the repo and push separately, telling git to send the
-  token verbatim:
+- **`git push` cannot work here — use the `github` MCP tools to push.**
+  GitHub's git-over-HTTPS endpoint accepts only HTTP Basic auth, which
+  base64-encodes the token, so the placeholder is never substituted and every
+  `git push`/`git fetch`/`gh repo create --push` fails with
+  `remote: invalid credentials` (verified 2026-09-14; Bearer/`token` headers
+  are rejected by GitHub even with a real token). The `github` MCP server is
+  wired to the same token and does the pushing:
 
-  ```sh
-  gh repo create BlueWeb-Org/<slug> --private
-  git remote add origin https://github.com/BlueWeb-Org/<slug>.git
-  git -c http.extraHeader="Authorization: Bearer $GH_TOKEN" push -u origin main
-  ```
+  1. `gh repo create BlueWeb-Org/<slug> --private` (the REST half works).
+  2. Scaffold and commit locally as usual — the local repo is your working
+     copy and CI/preview source of truth is what lands on GitHub.
+  3. Push with `push_files` (many files, one commit, to a branch) — the
+     scaffold is ~30 small text files, one call. Later changes: `push_files`
+     to a branch, then `create_pull_request`; `gh run list` / `gh pr checks`
+     for CI. Read file contents from disk; never paste a token into a call.
+  4. Keep local git and GitHub in step: after a `push_files`, note the
+     returned commit and treat GitHub as canonical.
 
-  Every later `git push`/`git fetch` needs the same `-c http.extraHeader=…`.
-  `gh` itself (`gh api`, `gh run list`, `gh pr create`) needs nothing extra.
+  `gh` itself (`gh api`, `gh run list`, `gh pr create`, `gh pr checks`) needs
+  nothing extra.
 - **Work under `/workspace`.** Repositories you were given are already cloned
   there; scaffold new sites with `--dir /workspace/customers`, not
   `~/Documents`. Cloudflare Pages is connected through the dashboard by a
