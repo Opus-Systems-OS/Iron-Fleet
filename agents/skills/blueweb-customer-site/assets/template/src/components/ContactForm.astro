@@ -1,0 +1,61 @@
+---
+/**
+ * Contact form. Renders only when business.email is set — a site with no
+ * inbox should not grow a form that quietly drops leads.
+ *
+ * It is a plain HTML form with no JavaScript at all: method="POST" to
+ * /api/contact, which is a Cloudflare Pages Function in this same repo (see
+ * functions/api/contact.js). It therefore works with scripts blocked, on an
+ * old phone, and under `script-src 'self'` — and because the endpoint is
+ * same-origin, `form-action 'self'` and `connect-src 'self'` stay strict.
+ *
+ * The Function answers with a 303 to /thanks/, so the back button does not
+ * offer to resubmit.
+ *
+ * `hp_website` is the honeypot. Bots fill every field they find; a real
+ * visitor never sees this one. It is off-screen rather than display:none
+ * because some bots skip hidden inputs — see .hp in global.css. Keep the
+ * name in sync with functions/api/contact.js.
+ */
+import { business } from '../data/business.js';
+---
+
+{business.email && (
+  <section id="contact" class="section-soft">
+    <div class="wrap">
+      <h2>Send us a message</h2>
+      <p>Prefer to talk? Call <a href={business.phoneHref}>{business.phone}</a>.</p>
+
+      <form class="form" method="POST" action="/api/contact">
+        <div class="field">
+          <label for="name">Your name</label>
+          <input id="name" name="name" type="text" autocomplete="name" required maxlength="100" />
+        </div>
+
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="email" required maxlength="200" />
+        </div>
+
+        <div class="field">
+          <label for="phone">Phone <span aria-hidden="true">(optional)</span></label>
+          <input id="phone" name="phone" type="tel" autocomplete="tel" maxlength="40" />
+        </div>
+
+        <div class="field">
+          <label for="message">How can we help?</label>
+          <textarea id="message" name="message" required maxlength="2000"></textarea>
+        </div>
+
+        <p class="hp" aria-hidden="true">
+          <label for="hp_website">Leave this field empty</label>
+          <input id="hp_website" name="hp_website" type="text" tabindex="-1" autocomplete="off" />
+        </p>
+
+        <div>
+          <button class="btn btn-primary" type="submit">Send message</button>
+        </div>
+      </form>
+    </div>
+  </section>
+)}

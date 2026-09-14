@@ -56,6 +56,9 @@
                 <option value="" disabled selected>Agent…</option>
               </select>
               <input id="new-session-task" type="text" placeholder="Task for the agent…" required />
+              <input id="new-session-repos" type="text"
+                     placeholder="Repos to mount (optional, GitHub URLs, comma-separated)"
+                     title="Extra https://github.com/<owner>/<repo> URLs cloned into /workspace for this session, on top of the agent's defaults" />
               <button type="submit">Start</button>
               <span id="new-session-error" class="settings-error"></span>
             </form>

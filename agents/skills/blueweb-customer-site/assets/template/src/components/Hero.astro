@@ -1,0 +1,28 @@
+---
+/**
+ * Above the fold. Three jobs, in order: say what the business is, say where,
+ * give a way to call. Everything else on the page is secondary to those.
+ */
+import { business } from '../data/business.js';
+
+const { city, state } = business.address;
+const place = business.hasStorefront ? `${city}, ${state}` : `serving ${city} and nearby`;
+---
+
+<section class="hero">
+  <div class="wrap">
+    {business.proofPoints.length > 0 && (
+      <ul class="proof">
+        {business.proofPoints.map((p) => <li>{p}</li>)}
+      </ul>
+    )}
+
+    <h1>{business.name}</h1>
+    <p class="lede">{business.tagline} &middot; {place}</p>
+
+    <div class="hero-actions">
+      <a class="btn btn-primary" href={business.phoneHref}>Call {business.phone}</a>
+      <a class="btn btn-ghost" href="#services">See what we do</a>
+    </div>
+  </div>
+</section>

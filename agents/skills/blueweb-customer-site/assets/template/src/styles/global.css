@@ -1,0 +1,277 @@
+/*
+ * One stylesheet for the whole site.
+ *
+ * Why one file and not component <style> blocks: public/_headers sets
+ * style-src-elem 'self', so an inline <style> element is refused by the
+ * browser. Astro emits component styles as external sheets when
+ * inlineStylesheets: 'never' is set, but keeping them here as well means
+ * there is one place to look when something is the wrong color.
+ *
+ * `--accent` and `--ink` are set as style="" attributes on <html> from
+ * src/data/business.js. Everything below is derived from them, so recoloring
+ * a whole site is a two-value change in the intake file.
+ */
+
+:root {
+  --accent: #0b5cad;
+  --ink: #12181f;
+
+  --bg: #ffffff;
+  --bg-soft: #f5f7fa;
+  --line: #dfe5ec;
+  --muted: #5b6675;
+
+  --wrap: 68rem;
+  --pad: clamp(1.25rem, 5vw, 3rem);
+  --radius: 0.65rem;
+
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+img { max-width: 100%; height: auto; display: block; }
+
+h1, h2, h3 { line-height: 1.15; letter-spacing: -0.015em; margin: 0 0 0.5em; }
+h1 { font-size: clamp(2rem, 6vw, 3.25rem); }
+h2 { font-size: clamp(1.5rem, 4vw, 2.125rem); }
+h3 { font-size: 1.1875rem; }
+p { margin: 0 0 1em; }
+
+a { color: var(--accent); }
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- layout ------------------------------------------------------------ */
+
+.wrap {
+  width: 100%;
+  max-width: var(--wrap);
+  margin-inline: auto;
+  padding-inline: var(--pad);
+}
+
+/* scroll-margin-top matches the sticky nav's height: without it, jumping to
+   /#hours puts the heading underneath the header rather than below it. */
+section {
+  padding-block: clamp(2.5rem, 8vw, 5rem);
+  scroll-margin-top: 4rem;
+}
+.section-soft { background: var(--bg-soft); }
+
+/* Skip link: hidden until focused. Required for keyboard users and it is
+   the single cheapest accessibility win on a page with a sticky nav. */
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 0.75rem 1rem;
+  z-index: 100;
+}
+.skip:focus { left: 0; }
+
+/* --- buttons ----------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3rem;          /* thumb-sized: most visitors are on a phone */
+  padding: 0.75rem 1.375rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { filter: brightness(0.92); }
+.btn-ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+.btn-ghost:hover { background: var(--bg-soft); }
+
+/* --- nav --------------------------------------------------------------- */
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 4rem;
+}
+.nav-brand {
+  font-weight: 700;
+  font-size: 1.0625rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+.nav-links { display: flex; align-items: center; gap: 1.25rem; }
+.nav-links a { color: var(--ink); text-decoration: none; font-weight: 500; }
+.nav-links a:hover { color: var(--accent); }
+
+/* The nav's call button is always visible, including on the narrowest
+   phone, because calling is the conversion this whole site exists for. */
+.nav-call { white-space: nowrap; }
+.nav-brand { white-space: nowrap; }
+
+/* Below 40rem the section links go and the phone number stays. The button
+   also gets tighter here: at 390px a full "Call (310) 555-0142" at desktop
+   size pushes the business name into wrapping onto a second line, which
+   doubles the height of the sticky header on the screen that can least
+   afford it. If a business name is long enough to wrap anyway, set
+   `shortName` in business.js rather than shrinking this further. */
+@media (max-width: 40rem) {
+  .nav-links a:not(.nav-call) { display: none; }
+  .nav-brand { font-size: 1rem; }
+  .nav-call {
+    padding: 0.625rem 0.875rem;
+    font-size: 0.9375rem;
+  }
+}
+
+/* --- hero -------------------------------------------------------------- */
+
+.hero { padding-block: clamp(3rem, 10vw, 6rem); }
+.hero p.lede {
+  font-size: clamp(1.0625rem, 2.5vw, 1.25rem);
+  color: var(--muted);
+  max-width: 42ch;
+}
+.hero-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.75rem; }
+
+/* On a phone these stack. Stretched to full width they read as two deliberate
+   choices; left to their natural widths they wrap into a ragged staircase. */
+@media (max-width: 34rem) {
+  .hero-actions { flex-direction: column; align-items: stretch; }
+}
+
+.proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+/* --- cards ------------------------------------------------------------- */
+
+.grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+}
+.card {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+}
+.card h3 { margin-bottom: 0.35rem; }
+.card p { margin: 0; color: var(--muted); }
+.card .price {
+  display: block;
+  margin-top: 0.75rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* --- hours ------------------------------------------------------------- */
+
+.hours { width: 100%; border-collapse: collapse; max-width: 26rem; }
+.hours th, .hours td { text-align: left; padding: 0.5rem 0; border-bottom: 1px solid var(--line); }
+.hours th { font-weight: 500; }
+.hours td { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* The hoursNote sits directly after the table and would otherwise read as an
+   eighth row. */
+.hours + p { margin-top: 1rem; }
+
+/* --- form -------------------------------------------------------------- */
+
+.form { display: grid; gap: 1rem; max-width: 34rem; }
+.field { display: grid; gap: 0.35rem; }
+.field label { font-weight: 600; font-size: 0.9375rem; }
+.field input,
+.field textarea {
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  min-height: 3rem;
+}
+.field textarea { min-height: 8rem; resize: vertical; }
+
+/* The honeypot. Not display:none — some bots skip hidden fields, and some
+   password managers refuse them. Off-screen and out of the tab order is the
+   version that actually catches things. */
+.hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+/* --- footer ------------------------------------------------------------ */
+
+.footer {
+  border-top: 1px solid var(--line);
+  padding-block: 2.5rem;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+.footer a { color: inherit; }
+.footer-grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+}
+.footer-builder { margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
+
+/* --- motion ------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

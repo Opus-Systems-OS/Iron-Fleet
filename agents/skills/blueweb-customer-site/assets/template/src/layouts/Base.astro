@@ -1,0 +1,67 @@
+---
+/**
+ * The only layout. Every page wraps in this.
+ *
+ * Two things here are load-bearing and easy to break:
+ *
+ * 1. The brand colors are applied as a style="" ATTRIBUTE on <html>, not as a
+ *    <style> element. style-src-elem in public/_headers refuses inline <style>
+ *    elements; style="" is allowed. This is how per-customer color reaches the
+ *    stylesheet without a build step.
+ *
+ * 2. The JSON-LD block below is the site's one inline script. It needs no CSP
+ *    hash — script-src does not apply to `type="application/ld+json"` — but it
+ *    is what Google reads for the business's hours and address, so it is not
+ *    decoration. See src/data/schema.js.
+ */
+import { business, displayName } from '../data/business.js';
+import { localBusinessJsonLd } from '../data/schema.js';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import '../styles/global.css';
+
+interface Props {
+  /** Page title WITHOUT the business name — the suffix is added here. */
+  title?: string;
+  description?: string;
+  /** Set false on /thanks/ and /404 so thin pages stay out of the index. */
+  indexable?: boolean;
+}
+
+const { title, description = business.tagline, indexable = true } = Astro.props;
+
+const pageTitle = title ? `${title} — ${displayName}` : `${displayName} — ${business.tagline}`;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? `https://${business.domain}`);
+const jsonLd = localBusinessJsonLd(business);
+---
+
+<html lang="en" style={`--accent: ${business.brand.accent}; --ink: ${business.brand.ink};`}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical.href} />
+    {!indexable && <meta name="robots" content="noindex" />}
+
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content={business.brand.accent} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical.href} />
+    <meta property="og:locale" content="en_US" />
+
+    <script type="application/ld+json" set:html={jsonLd} />
+  </head>
+
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <Nav />
+    <main id="main">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

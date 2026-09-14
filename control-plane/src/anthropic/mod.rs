@@ -1,9 +1,12 @@
-//! Thin Managed Agents client. Every request goes through [`Client::send`], which
-//! is the only place headers are set — so the beta header cannot be forgotten.
+//! Thin Managed Agents client. Every Managed Agents request goes through
+//! [`Client::send`], which is the only place the beta header is set — so it
+//! cannot be forgotten. The GA Skills API (`/v1/skills`, multipart, no beta)
+//! goes through [`Client::send_multipart`]; both share auth and error handling.
 
 pub mod types;
 
 use crate::error::{Error, Result};
+use crate::registry::SkillDir;
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -47,7 +50,7 @@ impl Client {
         })
     }
 
-    /// The single request path. Sets the API key, API version and beta header.
+    /// The Managed Agents request path. Sets the API key, API version and beta header.
     async fn send<T: DeserializeOwned>(
         &self,
         method: Method,
@@ -55,19 +58,42 @@ impl Client {
         query: &[(&str, &str)],
         body: Option<&impl Serialize>,
     ) -> Result<T> {
-        let url = format!("{}{}", self.base_url, path);
         let mut req = self
-            .http
-            .request(method.clone(), &url)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
+            .request(method.clone(), path)
             .header("anthropic-beta", MANAGED_AGENTS_BETA)
-            .header("accept", "application/json")
             .query(query);
         if let Some(b) = body {
             req = req.json(b);
         }
+        self.finish(req, &method, path).await
+    }
 
+    /// The Skills API path: same auth, `multipart/form-data`, and **no** beta
+    /// header — `/v1/skills` is GA and the Managed Agents beta does not apply.
+    async fn send_multipart<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        form: reqwest::multipart::Form,
+    ) -> Result<T> {
+        let req = self.request(Method::POST, path).multipart(form);
+        self.finish(req, &Method::POST, path).await
+    }
+
+    fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
+        let url = format!("{}{}", self.base_url, path);
+        self.http
+            .request(method, &url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("accept", "application/json")
+    }
+
+    async fn finish<T: DeserializeOwned>(
+        &self,
+        req: reqwest::RequestBuilder,
+        method: &Method,
+        path: &str,
+    ) -> Result<T> {
         let resp = req.send().await?;
         let status = resp.status();
         let request_id = resp
@@ -78,7 +104,7 @@ impl Client {
         let bytes = resp.bytes().await?;
 
         if !status.is_success() {
-            return Err(upstream_error(status, &bytes, request_id, &method, path));
+            return Err(upstream_error(status, &bytes, request_id, method, path));
         }
 
         serde_json::from_slice(&bytes).map_err(|e| Error::Upstream {
@@ -99,6 +125,27 @@ impl Client {
     pub async fn update_agent(&self, id: &str, def: &AgentDefinition) -> Result<Agent> {
         self.send(Method::POST, &format!("/v1/agents/{id}"), &[], Some(def))
             .await
+    }
+
+    // ---- skills
+
+    /// `POST /v1/skills`: first upload of a skill directory. `display_name`
+    /// is left to default from the frontmatter `name`.
+    pub async fn create_skill(&self, skill: &SkillDir) -> Result<Skill> {
+        self.send_multipart("/v1/skills", skill_form(skill)).await
+    }
+
+    /// `POST /v1/skills/{id}/versions`: a full snapshot (never a delta).
+    pub async fn create_skill_version(
+        &self,
+        skill_id: &str,
+        skill: &SkillDir,
+    ) -> Result<SkillVersion> {
+        self.send_multipart(
+            &format!("/v1/skills/{skill_id}/versions"),
+            skill_form(skill),
+        )
+        .await
     }
 
     // ---- environments
@@ -122,6 +169,23 @@ impl Client {
         self.send(
             Method::POST,
             &format!("/v1/vaults/{vault_id}/credentials"),
+            &[],
+            Some(def),
+        )
+        .await
+    }
+
+    /// Rotate a credential's secret in place (`secret_name` / `mcp_server_url`
+    /// are immutable; anything else goes through here).
+    pub async fn update_credential(
+        &self,
+        vault_id: &str,
+        credential_id: &str,
+        def: &CredentialUpdate,
+    ) -> Result<Credential> {
+        self.send(
+            Method::POST,
+            &format!("/v1/vaults/{vault_id}/credentials/{credential_id}"),
             &[],
             Some(def),
         )
@@ -180,6 +244,21 @@ impl Client {
         )
         .await
     }
+}
+
+/// One `files[]` part per file, named `<skill>/<relative path>` — the Skills
+/// API requires every file under a single top-level directory that contains
+/// `SKILL.md`, and reads the directory structure from the part file names.
+/// reqwest percent-encodes file names by default, which would turn the `/`
+/// into `%2F` and flatten the tree; `percent_encode_noop` sends them verbatim.
+fn skill_form(skill: &SkillDir) -> reqwest::multipart::Form {
+    let mut form = reqwest::multipart::Form::new().percent_encode_noop();
+    for (rel, bytes) in &skill.files {
+        let part = reqwest::multipart::Part::bytes(bytes.clone())
+            .file_name(format!("{}/{}", skill.name, rel));
+        form = form.part("files[]", part);
+    }
+    form
 }
 
 fn upstream_error(

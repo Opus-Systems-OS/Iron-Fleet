@@ -1,0 +1,24 @@
+---
+/**
+ * Where functions/api/contact.js sends a successful submission (303).
+ * noindex: a thank-you page in search results is a dead end for the visitor
+ * and a thin page for the site.
+ */
+import Base from '../layouts/Base.astro';
+import { business } from '../data/business.js';
+---
+
+<Base title="Thank you" description="Your message has been sent." indexable={false}>
+  <section class="hero">
+    <div class="wrap">
+      <h1>Thanks — we got it.</h1>
+      <p class="lede">
+        We will get back to you shortly. If it is urgent, call
+        <a href={business.phoneHref}>{business.phone}</a>.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-ghost" href="/">Back to the site</a>
+      </div>
+    </div>
+  </section>
+</Base>

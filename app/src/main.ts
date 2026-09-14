@@ -98,6 +98,7 @@ const tabUsage = el<HTMLElement>("tab-usage");
 const newSessionForm = el<HTMLFormElement>("new-session-form");
 const newSessionAgent = el<HTMLSelectElement>("new-session-agent");
 const newSessionTask = el<HTMLInputElement>("new-session-task");
+const newSessionRepos = el<HTMLInputElement>("new-session-repos");
 const newSessionError = el<HTMLSpanElement>("new-session-error");
 const usageAgentsBody = el<HTMLTableSectionElement>("usage-agents-body");
 const usageRecentBody = el<HTMLTableSectionElement>("usage-recent-body");
@@ -283,8 +284,13 @@ newSessionForm.addEventListener("submit", async (e) => {
     await invoke("create_session", {
       agentSlug: newSessionAgent.value,
       task: newSessionTask.value,
+      repositories: newSessionRepos.value
+        .split(",")
+        .map((r) => r.trim())
+        .filter((r) => r.length > 0),
     });
     newSessionTask.value = "";
+    newSessionRepos.value = "";
     await refresh();
   } catch (err) {
     newSessionError.textContent = String(err);

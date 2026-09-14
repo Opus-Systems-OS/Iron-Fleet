@@ -68,6 +68,30 @@ pub struct Agent {
     pub version: u32,
 }
 
+// ---------------------------------------------------------------- skills
+//
+// The Skills API (`/v1/skills`) is GA — no beta header — and takes multipart
+// uploads rather than JSON, so these are response types only; the request is
+// built from a `registry::SkillDir` in `Client::create_skill*`.
+
+/// `POST /v1/skills` response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Skill {
+    pub id: String,
+    /// What `version: "latest"` resolves to right now; pinned into the agent
+    /// definition instead so a skill change rolls a new agent version.
+    pub latest_version_id: String,
+}
+
+/// `POST /v1/skills/{id}/versions` response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SkillVersion {
+    pub id: String,
+    /// Immutable kebab-case slug from the first upload's frontmatter `name`;
+    /// sync checks it still equals the directory name.
+    pub name: String,
+}
+
 // ---------------------------------------------------------- environments
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +223,34 @@ pub struct SessionCreate {
     /// an agent's `mcp_servers` entries by URL at runtime, not by name.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub vault_ids: Vec<String>,
+    /// Repositories cloned into the sandbox at session start
+    /// (docs: managed-agents/github). Cloud environments only.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub resources: Vec<SessionResource>,
+}
+
+/// One `resources[]` entry. Only `github_repository` is modelled.
+#[derive(Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionResource {
+    /// `url` is `https://github.com/<owner>/<repo>` (no `.git`); the repo
+    /// lands at `/workspace/<repo>` since `mount_path` is left to default.
+    GithubRepository {
+        url: String,
+        authorization_token: String,
+    },
+}
+
+impl std::fmt::Debug for SessionResource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SessionResource::GithubRepository { url, .. } => f
+                .debug_struct("GithubRepository")
+                .field("url", url)
+                .field("authorization_token", &"<redacted>")
+                .finish(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------- vaults
@@ -216,15 +268,66 @@ pub struct Vault {
     pub id: String,
 }
 
-/// A credential's `auth` object. Only `static_bearer` is implemented — the
-/// one shape `mcp-fleet` needs (a fixed bearer token, not OAuth).
-#[derive(Debug, Clone, Serialize)]
+/// A credential's `auth` object. Two of the three documented shapes: the
+/// `static_bearer` that `mcp-fleet` needs, and `environment_variable` for
+/// CLIs in the sandbox (`gh`, `wrangler`). OAuth is not implemented.
+#[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CredentialAuth {
     StaticBearer {
         mcp_server_url: String,
         token: String,
     },
+    /// The sandbox sees `secret_name` set to an opaque placeholder; the real
+    /// value is substituted at egress, only on `allowed_hosts`, and only in
+    /// request headers (`injection_location.header`) — the narrowest scope,
+    /// and the only one `gh`/`wrangler` need. Body injection is deliberately
+    /// not offered here.
+    EnvironmentVariable {
+        secret_name: String,
+        secret_value: String,
+        networking: CredentialNetworking,
+        injection_location: InjectionLocation,
+    },
+}
+
+// Secrets pass through this type; keep them out of `{:?}` output, which the
+// tracing macros happily render.
+impl std::fmt::Debug for CredentialAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CredentialAuth::StaticBearer { mcp_server_url, .. } => f
+                .debug_struct("StaticBearer")
+                .field("mcp_server_url", mcp_server_url)
+                .field("token", &"<redacted>")
+                .finish(),
+            CredentialAuth::EnvironmentVariable {
+                secret_name,
+                networking,
+                ..
+            } => f
+                .debug_struct("EnvironmentVariable")
+                .field("secret_name", secret_name)
+                .field("secret_value", &"<redacted>")
+                .field("networking", networking)
+                .finish(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CredentialNetworking {
+    Limited { allowed_hosts: Vec<String> },
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct InjectionLocation {
+    pub header: bool,
+}
+
+impl InjectionLocation {
+    pub const HEADER_ONLY: Self = Self { header: true };
 }
 
 /// Body of `POST /v1/vaults/{vault_id}/credentials`.
@@ -232,6 +335,34 @@ pub enum CredentialAuth {
 pub struct CredentialCreate {
     pub display_name: String,
     pub auth: CredentialAuth,
+}
+
+/// Body of `POST /v1/vaults/{vault_id}/credentials/{credential_id}` — a
+/// rotation. `secret_name` is immutable; `networking` is a full replacement.
+#[derive(Debug, Clone, Serialize)]
+pub struct CredentialUpdate {
+    pub auth: CredentialAuthUpdate,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CredentialAuthUpdate {
+    EnvironmentVariable {
+        secret_value: String,
+        networking: CredentialNetworking,
+    },
+}
+
+impl std::fmt::Debug for CredentialAuthUpdate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CredentialAuthUpdate::EnvironmentVariable { networking, .. } => f
+                .debug_struct("EnvironmentVariable")
+                .field("secret_value", &"<redacted>")
+                .field("networking", networking)
+                .finish(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -292,6 +423,7 @@ mod tests {
             initial_events: vec![UserMessageEvent::text("hi")],
             metadata: BTreeMap::from([("iron_fleet_agent".into(), "jarvis".into())]),
             vault_ids: vec![],
+            resources: vec![],
         };
         let v = serde_json::to_value(&body).unwrap();
         assert!(v.get("vault_ids").is_none(), "empty vault_ids is omitted");
@@ -320,6 +452,7 @@ mod tests {
             initial_events: vec![UserMessageEvent::text("hi")],
             metadata: BTreeMap::new(),
             vault_ids: vec!["vlt_1".into()],
+            resources: vec![],
         };
         let v = serde_json::to_value(&body).unwrap();
         assert_eq!(v["vault_ids"], serde_json::json!(["vlt_1"]));
