@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>J.A.R.V.I.S. — Iron Fleet</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">IF</span>
+          <span class="brand-name">Iron Fleet</span>
+        </div>
+        <div class="topbar-right">
+          <span id="last-updated" class="last-updated"></span>
+          <span id="connection-badge" class="badge badge-unknown">checking…</span>
+          <button id="settings-toggle" class="icon-button" title="Connection settings" type="button">⚙</button>
+        </div>
+      </header>
+
+      <section id="settings-panel" class="settings-panel" hidden>
+        <form id="settings-form" class="settings-form">
+          <label>
+            Control plane URL
+            <input id="settings-url" type="url" placeholder="https://iron-fleet-production.up.railway.app" required />
+          </label>
+          <label>
+            Token
+            <input id="settings-token" type="password" placeholder="CONTROL_PLANE_TOKEN" required />
+          </label>
+          <div class="settings-actions">
+            <button type="submit">Connect</button>
+            <span id="settings-error" class="settings-error"></span>
+          </div>
+        </form>
+      </section>
+
+      <main class="content">
+        <div id="error-banner" class="error-banner" hidden></div>
+
+        <section class="panel">
+          <h2>Agents</h2>
+          <table class="fleet-table" id="agents-table">
+            <thead>
+              <tr>
+                <th>Slug</th>
+                <th>Effort</th>
+                <th>Cap</th>
+                <th>Environment</th>
+                <th>Version</th>
+                <th>Synced</th>
+              </tr>
+            </thead>
+            <tbody id="agents-body">
+              <tr class="empty-row"><td colspan="6">Not connected.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <h2>Sessions</h2>
+          <table class="fleet-table" id="sessions-table">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Title</th>
+                <th>Agent</th>
+                <th>Environment</th>
+                <th>Cost / Cap</th>
+                <th>Active</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody id="sessions-body">
+              <tr class="empty-row"><td colspan="7">Not connected.</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
