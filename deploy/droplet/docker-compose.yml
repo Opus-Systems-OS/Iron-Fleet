@@ -1,0 +1,51 @@
+# Iron-Fleet on the opustower.dev droplet: Caddy in front of the two binaries
+# we already ship. Images come from GHCR (.github/workflows/images.yml); this
+# box never builds. Only Caddy publishes ports — the services are reachable
+# solely through it, on the compose network.
+#
+# .env (chmod 600, never committed) is read by both services; each ignores
+# the variables it doesn't know. See env.example for the full list.
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - control-plane
+      - mcp-fleet
+
+  control-plane:
+    image: ghcr.io/opus1247/iron-fleet/control-plane:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "8080"
+      DATABASE_PATH: /data/control-plane.db
+    volumes:
+      - cp_data:/data
+    # No container healthcheck: the slim runtime image has neither curl nor
+    # bash. `curl https://fleet.opustower.dev/healthz` through Caddy is the check.
+
+  mcp-fleet:
+    image: ghcr.io/opus1247/iron-fleet/mcp-fleet:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "8090"
+      # Compose DNS; no reason to leave the box for the control plane.
+      CONTROL_PLANE_URL: http://control-plane:8080
+    depends_on:
+      - control-plane
+
+volumes:
+  cp_data:
+  caddy_data:
+  caddy_config:
