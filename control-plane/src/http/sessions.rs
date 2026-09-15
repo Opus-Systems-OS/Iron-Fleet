@@ -1,14 +1,17 @@
-//! Session routes. Create applies the registry's budget policy; reads are
-//! proxied live to the Managed Agents API and passed through unchanged.
+//! Session routes. Create applies the registry's budget policy; reads —
+//! including the live event stream — are proxied to the Managed Agents API
+//! and passed through unchanged.
 
 use super::AppState;
-use crate::anthropic::types::{AgentRef, Budget, SessionCreate, SessionResource, UserMessageEvent};
+use crate::anthropic::types::{AgentRef, Budget, SessionCreate, SessionEvent, SessionResource};
 use crate::error::{Error, Result};
 use crate::money::Cents;
 use crate::registry::is_github_repo_url;
+use axum::body::Body;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
+use axum::response::Response;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -157,7 +160,7 @@ pub async fn create(
         environment_id: environment_id.clone(),
         title: Some(title_from(task)),
         budget: Budget::limit(agent.max_list_cost_cents),
-        initial_events: vec![UserMessageEvent::text(task)],
+        initial_events: vec![SessionEvent::text(task)],
         metadata: BTreeMap::from([
             ("iron_fleet_agent".to_owned(), agent.slug.clone()),
             ("iron_fleet_environment".to_owned(), env_slug.clone()),
@@ -276,7 +279,7 @@ pub async fn send_event(
     }
     let result = state
         .api
-        .send_events(&id, vec![UserMessageEvent::text(task)])
+        .send_events(&id, vec![SessionEvent::text(task)])
         .await?;
     tracing::info!(session = %id, "event sent");
     Ok(Json(result))
@@ -294,6 +297,110 @@ pub async fn interrupt(
     let result = state.api.interrupt_session(&id).await?;
     tracing::info!(session = %id, "session interrupted");
     Ok(Json(result))
+}
+
+/// Query for `GET /sessions/{id}/events`. `types` is comma-separated here
+/// and fanned out to the API's repeated `types[]`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EventsQuery {
+    #[serde(default)]
+    pub page: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub types: Option<String>,
+}
+
+/// Event history, oldest first, as the Anthropic envelope (`data`,
+/// `next_page`, `prev_page`) unchanged. Paired with `stream` for the
+/// documented reconnect pattern: open the stream, list history, dedupe on `id`.
+pub async fn list_events(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<EventsQuery>,
+) -> Result<Json<Value>> {
+    if !valid_session_id(&id) {
+        return Err(Error::InvalidRequest(
+            "session id has unexpected characters".into(),
+        ));
+    }
+    let mut query: Vec<(&str, String)> = Vec::new();
+    if let Some(page) = &q.page {
+        query.push(("page", page.clone()));
+    }
+    if let Some(limit) = q.limit {
+        query.push(("limit", limit.to_string()));
+    }
+    for t in csv(q.types.as_deref()) {
+        query.push(("types[]", t));
+    }
+    let borrowed: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    Ok(Json(state.api.list_events_raw(&id, &borrowed).await?))
+}
+
+/// The only `event_deltas` values the API accepts; anything else is a 400
+/// upstream, so reject it here with a clearer message.
+const EVENT_DELTA_TYPES: [&str; 2] = ["agent.message", "agent.thinking"];
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StreamQuery {
+    /// Comma-separated subset of `EVENT_DELTA_TYPES`.
+    #[serde(default)]
+    pub event_deltas: Option<String>,
+}
+
+fn parse_event_deltas(raw: Option<&str>) -> Result<Vec<String>> {
+    let deltas = csv(raw);
+    if let Some(bad) = deltas
+        .iter()
+        .find(|d| !EVENT_DELTA_TYPES.contains(&d.as_str()))
+    {
+        return Err(Error::InvalidRequest(format!(
+            "event_deltas `{bad}` is not one of {}",
+            EVENT_DELTA_TYPES.join(", ")
+        )));
+    }
+    Ok(deltas)
+}
+
+fn csv(raw: Option<&str>) -> Vec<String> {
+    raw.unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `GET /sessions/{id}/stream`: the session's live event stream, proxied as
+/// SSE byte-for-byte. Each frame is `data: {event}` where `{event}` is the
+/// Anthropic event object unchanged. Holds the upstream connection open for
+/// as long as the caller does; dropping this response cancels it. Only
+/// events emitted after the stream opens arrive — list `/events` afterwards
+/// to fill in history.
+pub async fn stream(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<StreamQuery>,
+) -> Result<Response> {
+    if !valid_session_id(&id) {
+        return Err(Error::InvalidRequest(
+            "session id has unexpected characters".into(),
+        ));
+    }
+    let deltas = parse_event_deltas(q.event_deltas.as_deref())?;
+    let upstream = state.api.open_event_stream(&id, &deltas).await?;
+    tracing::info!(session = %id, deltas = deltas.len(), "event stream opened");
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .header(header::CACHE_CONTROL, "no-cache")
+        // Tell buffering proxies (nginx-style) to pass frames through as they arrive.
+        .header("x-accel-buffering", "no")
+        .body(Body::from_stream(upstream.bytes_stream()))
+        .map_err(|e| Error::Config(format!("stream response: {e}")))
 }
 
 fn title_from(task: &str) -> String {
@@ -332,6 +439,23 @@ mod tests {
         let t = title_from(&long);
         assert_eq!(t.chars().count(), TITLE_MAX_CHARS + 1);
         assert!(t.ends_with('…'));
+    }
+
+    #[test]
+    fn event_deltas_are_validated_against_the_documented_set() {
+        assert_eq!(parse_event_deltas(None).unwrap(), Vec::<String>::new());
+        assert_eq!(
+            parse_event_deltas(Some("agent.message, agent.thinking")).unwrap(),
+            vec!["agent.message".to_owned(), "agent.thinking".to_owned()]
+        );
+        let err = parse_event_deltas(Some("agent.message,span.model_request_start")).unwrap_err();
+        assert!(matches!(err, Error::InvalidRequest(_)), "{err}");
+    }
+
+    #[test]
+    fn csv_trims_and_drops_empties() {
+        assert_eq!(csv(Some(" a,,b ,")), vec!["a".to_owned(), "b".to_owned()]);
+        assert!(csv(Some("")).is_empty());
     }
 
     #[test]

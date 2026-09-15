@@ -189,17 +189,23 @@ pub struct TextBlock {
     pub text: String,
 }
 
+/// An event we send to a session (`initial_events` on create, or the body of
+/// `POST /v1/sessions/{id}/events`). `Interrupt` is how a running turn is
+/// stopped — there is no separate interrupt route (docs:
+/// managed-agents/events-and-streaming, "Interrupting"). Only `Message` is
+/// valid in `initial_events`; `sessions::create` never builds anything else.
 #[derive(Debug, Clone, Serialize)]
-pub struct UserMessageEvent {
-    #[serde(rename = "type")]
-    pub kind: &'static str, // "user.message"
-    pub content: Vec<TextBlock>,
+#[serde(tag = "type")]
+pub enum SessionEvent {
+    #[serde(rename = "user.message")]
+    Message { content: Vec<TextBlock> },
+    #[serde(rename = "user.interrupt")]
+    Interrupt,
 }
 
-impl UserMessageEvent {
+impl SessionEvent {
     pub fn text(text: impl Into<String>) -> Self {
-        UserMessageEvent {
-            kind: "user.message",
+        SessionEvent::Message {
             content: vec![TextBlock {
                 kind: "text",
                 text: text.into(),
@@ -209,11 +215,10 @@ impl UserMessageEvent {
 }
 
 /// Body of `POST /v1/sessions/{id}/events`. Shape mirrors `SessionCreate`'s
-/// `initial_events`. **Unconfirmed** — unlike the rest of this file, nothing
-/// has exercised this against the live API yet; see `Client::send_events`.
+/// `initial_events`.
 #[derive(Debug, Clone, Serialize)]
 pub struct SendEvents {
-    pub events: Vec<UserMessageEvent>,
+    pub events: Vec<SessionEvent>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -223,7 +228,7 @@ pub struct SessionCreate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     pub budget: Budget,
-    pub initial_events: Vec<UserMessageEvent>,
+    pub initial_events: Vec<SessionEvent>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
     /// Vault ids to authenticate this session's MCP servers with — matched to
@@ -434,7 +439,7 @@ mod tests {
             environment_id: "env_1".into(),
             title: Some("t".into()),
             budget: Budget::limit("50".parse().unwrap()),
-            initial_events: vec![UserMessageEvent::text("hi")],
+            initial_events: vec![SessionEvent::text("hi")],
             metadata: BTreeMap::from([("iron_fleet_agent".into(), "jarvis".into())]),
             vault_ids: vec![],
             resources: vec![],
@@ -463,7 +468,7 @@ mod tests {
             environment_id: "env_1".into(),
             title: None,
             budget: Budget::limit("50".parse().unwrap()),
-            initial_events: vec![UserMessageEvent::text("hi")],
+            initial_events: vec![SessionEvent::text("hi")],
             metadata: BTreeMap::new(),
             vault_ids: vec!["vlt_1".into()],
             resources: vec![],
@@ -547,6 +552,24 @@ mod tests {
             v["tools"],
             serde_json::json!([{"type":"agent_toolset_20260401"}])
         );
+    }
+
+    #[test]
+    fn session_events_serialize_to_the_documented_wire_shapes() {
+        assert_eq!(
+            serde_json::to_value(SessionEvent::Interrupt).unwrap(),
+            serde_json::json!({"type":"user.interrupt"})
+        );
+        assert_eq!(
+            serde_json::to_value(SessionEvent::text("hi")).unwrap(),
+            serde_json::json!({"type":"user.message","content":[{"type":"text","text":"hi"}]})
+        );
+        let body = SendEvents {
+            events: vec![SessionEvent::Interrupt, SessionEvent::text("now this")],
+        };
+        let v = serde_json::to_value(&body).unwrap();
+        assert_eq!(v["events"][0]["type"], "user.interrupt");
+        assert_eq!(v["events"][1]["type"], "user.message");
     }
 
     #[test]

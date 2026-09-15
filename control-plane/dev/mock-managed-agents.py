@@ -11,15 +11,31 @@ Nothing here is a substitute for the real API; it only checks the wire shape.
 """
 import json
 import sys
+import time
 import uuid
+from datetime import datetime, timezone
 from email.parser import BytesParser
 from email.policy import HTTP
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 
 REQUIRED = {"x-api-key": None, "anthropic-version": "2023-06-01", "anthropic-beta": "managed-agents-2026-04-01"}
 # The Skills API is GA: same key/version, multipart body, and no beta header.
 SKILLS_REQUIRED = {"x-api-key": None, "anthropic-version": "2023-06-01"}
 STATE = {"agents": {}, "environments": {}, "sessions": {}, "vaults": {}, "credentials": {}, "skills": {}}
+# Per-session event history, oldest first — what GET …/events returns.
+EVENTS = {}
+
+
+def _now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _record(sid, event):
+    """Persist an event the way the API does: server-assigned id and processed_at."""
+    event = {"id": "sevt_mock_" + uuid.uuid4().hex[:10], "processed_at": _now(), **event}
+    EVENTS.setdefault(sid, []).append(event)
+    return event
 
 # What docs.claude.com/managed-agents/mcp-connector documents as the only
 # accepted mcp_servers entry fields — this is what caught the real
@@ -173,20 +189,21 @@ class H(BaseHTTPRequestHandler):
                 "usage": {"input_tokens": 0, "output_tokens": 0, "active_seconds": 0,
                           "list_cost": {"amount": "1", "currency": "USD"}},
             }
+            for ev in body.get("initial_events", []):
+                _record(sid, ev)
             return self._json(200, STATE["sessions"][sid])
         if p.startswith("/v1/sessions/") and p.endswith("/events"):
+            # There is no /interrupt route on the real API: user.interrupt is
+            # just another event here, and the turn ends with status_idle.
             sid = p.split("/")[3]
             s = STATE["sessions"].get(sid)
             if not s:
                 return self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "no such session"}})
-            s["status"] = "running"
-            return self._json(200, s)
-        if p.startswith("/v1/sessions/") and p.endswith("/interrupt"):
-            sid = p.split("/")[3]
-            s = STATE["sessions"].get(sid)
-            if not s:
-                return self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "no such session"}})
-            s["status"] = "idle"
+            for ev in body.get("events", []):
+                if ev.get("type") not in ("user.message", "user.interrupt"):
+                    return self._json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": f"unsupported event type {ev.get('type')!r}"}})
+                _record(sid, ev)
+                s["status"] = "idle" if ev["type"] == "user.interrupt" else "running"
             return self._json(200, s)
         if p == "/v1/vaults":
             vid = "vlt_mock_" + uuid.uuid4().hex[:10]
@@ -318,6 +335,48 @@ class H(BaseHTTPRequestHandler):
                 return f"no such custom skill {s['skill_id']!r}"
         return None
 
+    def _stream(self, sid):
+        """SSE as the docs describe it: `data: {event}` frames, one persisted event
+        each, only events emitted after the stream opened. Plays a scripted turn,
+        then holds the connection open until the client hangs up."""
+        s = STATE["sessions"].get(sid)
+        if not s:
+            return self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "no such session"}})
+        if self.headers.get("accept") != "text/event-stream":
+            return self._json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": "accept: text/event-stream required"}})
+        self.send_response(200)
+        self.send_header("content-type", "text/event-stream")
+        self.send_header("cache-control", "no-cache")
+        self.end_headers()
+        # The real stream opens with a comment frame; readers must ignore it.
+        self.wfile.write(b": connected\n\n")
+        self.wfile.flush()
+        script = [
+            {"type": "session.status_running"},
+            {"type": "span.model_request_start"},
+            {"type": "agent.message", "content": [{"type": "text", "text": "Mock agent here — I got the task and I am on it."}]},
+            {"type": "span.model_request_end"},
+            {"type": "agent.tool_use", "name": "bash", "input": {"command": "ls /workspace"}, "evaluated_permission": "allow"},
+            {"type": "agent.tool_result", "content": [{"type": "text", "text": "README.md\nsrc\n"}]},
+            {"type": "agent.message", "content": [{"type": "text", "text": "Done: two entries in the workspace."}]},
+            {"type": "session.usage", "usage": {"input_tokens": 120, "output_tokens": 40, "active_seconds": 2.5, "list_cost": {"amount": "3", "currency": "USD"}}, "budget": s["budget"]},
+            {"type": "session.status_idle", "stop_reason": {"type": "end_turn"}},
+        ]
+        try:
+            for ev in script:
+                time.sleep(0.4)
+                ev = _record(sid, ev)
+                if ev["type"] == "session.status_idle":
+                    s["status"] = "idle"
+                elif ev["type"] == "session.status_running":
+                    s["status"] = "running"
+                self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
+                self.wfile.flush()
+            while True:  # hold open like the real stream does between turns
+                time.sleep(1)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def do_GET(self):
         if not self._check_headers():
             return
@@ -325,6 +384,13 @@ class H(BaseHTTPRequestHandler):
         p = self.path.split("?")[0]
         if p == "/v1/sessions":
             return self._json(200, {"data": list(STATE["sessions"].values()), "next_page": None, "prev_page": None})
+        if p.startswith("/v1/sessions/") and p.endswith("/events/stream"):
+            return self._stream(p.split("/")[3])
+        if p.startswith("/v1/sessions/") and p.endswith("/events"):
+            sid = p.split("/")[3]
+            if sid not in STATE["sessions"]:
+                return self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "no such session"}})
+            return self._json(200, {"data": EVENTS.get(sid, []), "next_page": None, "prev_page": None})
         if p.startswith("/v1/sessions/"):
             s = STATE["sessions"].get(p.rsplit("/", 1)[1])
             if s:
@@ -342,4 +408,7 @@ class H(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 9999
     print(f"mock managed agents api on 127.0.0.1:{port}", flush=True)
-    HTTPServer(("127.0.0.1", port), H).serve_forever()
+    class Server(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+
+    Server(("127.0.0.1", port), H).serve_forever()

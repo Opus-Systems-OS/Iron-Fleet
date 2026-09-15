@@ -103,6 +103,24 @@
               </tbody>
             </table>
           </section>
+
+          <section id="session-panel" class="panel session-panel" hidden>
+            <div class="panel-head session-head">
+              <div class="session-head-main">
+                <span id="session-status" class="badge badge-unknown">—</span>
+                <h2 id="session-title" class="session-title"></h2>
+                <span id="session-cost" class="mono dim"></span>
+                <span id="stream-state" class="stream-pill stream-idle" title="event stream">connecting</span>
+              </div>
+              <div class="session-head-actions">
+                <button class="mini-button" id="session-message" type="button">Message</button>
+                <button class="mini-button mini-button-alert" id="session-interrupt" type="button">Interrupt</button>
+                <button class="mini-button" id="session-console" type="button">Console</button>
+                <button class="mini-button" id="session-close" type="button" title="Deselect">✕</button>
+              </div>
+            </div>
+            <div id="transcript" class="transcript"></div>
+          </section>
         </section>
 
         <section id="tab-usage" class="tab-panel" hidden>

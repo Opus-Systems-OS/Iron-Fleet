@@ -23,7 +23,8 @@ Every request goes through a Tauri command (`invoke(...)`) into
 - **Message** — a follow-up `user.message` on a running session
   (`POST /sessions/{id}/events`). Prompts for text with `window.prompt`.
 - **Interrupt** — stops a session's in-flight work without ending it
-  (`POST /sessions/{id}/interrupt`), behind a `window.confirm`.
+  (`POST /sessions/{id}/interrupt`, which the control plane turns into a
+  `user.interrupt` event), behind a `window.confirm`.
 - **Console** — opens the session's Anthropic Console trace URL in the
   system browser via `@tauri-apps/plugin-opener`'s `openUrl` (hence
   `opener:default` in `capabilities/default.json`, re-added for this).
@@ -31,10 +32,37 @@ Every request goes through a Tauri command (`invoke(...)`) into
 There is still no way to raise a session's cap — the control plane's budgets
 are create-only, so no route exists for it anywhere, not just in this UI.
 
-`/events` and `/interrupt` carry the same caveat as
-`control-plane/README.md`: unconfirmed endpoint paths, no fixture from a
-live run yet. `control-plane/dev/mock-managed-agents.py` now implements
-both so the full loop can be exercised locally before that first live run.
+## Live session transcript (centralization Phase 3)
+
+Click a session row and a panel opens under the table with that session's
+transcript, fed live. The webview never polls for it:
+
+- `invoke("watch_session", { id })` starts a Rust task (`src-tauri/src/stream.rs`)
+  that opens `GET /sessions/{id}/stream` on the control plane (its proxy of
+  the Managed Agents SSE stream), then lists `GET /sessions/{id}/events` for
+  history, then tails the stream skipping ids the history already delivered —
+  the reconnect pattern from the Managed Agents docs, since only events
+  emitted after a stream opens are delivered on it. One watch at a time; it
+  follows the selected row.
+- Every event reaches the page as a Tauri event `session-event`
+  `{ session_id, event }`, where `event` is the Anthropic event object
+  unchanged. `session-stream-state` `{ session_id, state, message? }` drives
+  the pill in the panel header (`open`, `reconnecting`, `error`).
+- On a dropped stream the task backs off (1s → 15s) and reconnects; the
+  history re-list is what closes the gap. A `4xx` from the control plane is
+  terminal (`error`).
+- The transcript renders `user.message`, `agent.message` (with
+  `event_delta` token previews streamed into a placeholder bubble when the
+  stream was opened with `event_deltas`), tool use / results (collapsed),
+  status changes, errors, and updates the header's cost from
+  `session.usage`. `span.*` and thinking are dropped as noise.
+
+The sessions *list* still polls every 5s — there is no stream for a list.
+The panel's seen-id set is the only state, belongs to one open watch, and dies
+with it: nothing here is fleet state.
+
+`control-plane/dev/mock-managed-agents.py` plays a scripted turn on the
+stream, so the whole panel can be exercised locally with no spend.
 
 ## Connecting to a control plane
 

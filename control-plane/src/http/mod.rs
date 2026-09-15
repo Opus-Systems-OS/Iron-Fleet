@@ -38,7 +38,11 @@ pub fn router(state: AppState) -> Router {
         .route("/agents", get(agents::list))
         .route("/sessions", post(sessions::create).get(sessions::list))
         .route("/sessions/{id}", get(sessions::get))
-        .route("/sessions/{id}/events", post(sessions::send_event))
+        .route(
+            "/sessions/{id}/events",
+            post(sessions::send_event).get(sessions::list_events),
+        )
+        .route("/sessions/{id}/stream", get(sessions::stream))
         .route("/sessions/{id}/interrupt", post(sessions::interrupt))
         .route("/usage", get(usage::get))
         .route_layer(middleware::from_fn_with_state(
