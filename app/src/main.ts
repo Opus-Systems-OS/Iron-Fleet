@@ -1,10 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 // Fleet Dashboard + Usage tab (build order stage 4: session controls, then
 // the Usage tab). Every value on screen is re-fetched from the control plane
 // on each poll — nothing here is cached fleet state, per CLAUDE.md ("clients
-// hold no fleet state").
+// hold no fleet state"). The one exception to polling is the selected
+// session: its transcript is fed live by the control plane's SSE proxy
+// (centralization Phase 3), via the Rust-side watcher in `stream.rs`.
 
 const POLL_MS = 5000;
 
@@ -51,6 +54,39 @@ interface Session {
 
 interface SessionListEnvelope {
   data: Session[];
+}
+
+/** One Anthropic session event, as the API sent it. Only the fields we render are typed. */
+interface SessionEvent {
+  type: string;
+  id?: string;
+  content?: ContentBlock[];
+  name?: string;
+  input?: unknown;
+  stop_reason?: { type: string };
+  error?: { message?: string };
+  usage?: SessionUsage;
+  budget?: SessionBudget;
+  // event_start / event_delta previews
+  event?: { type: string; id: string };
+  event_id?: string;
+  delta?: { type: string; index: number; content?: ContentBlock };
+}
+
+interface ContentBlock {
+  type: string;
+  text?: string;
+}
+
+interface SessionEventPayload {
+  session_id: string;
+  event: SessionEvent;
+}
+
+interface StreamStatePayload {
+  session_id: string;
+  state: "open" | "reconnecting" | "closed" | "error";
+  message?: string;
 }
 
 interface AgentUsage {
@@ -102,9 +138,21 @@ const newSessionRepos = el<HTMLInputElement>("new-session-repos");
 const newSessionError = el<HTMLSpanElement>("new-session-error");
 const usageAgentsBody = el<HTMLTableSectionElement>("usage-agents-body");
 const usageRecentBody = el<HTMLTableSectionElement>("usage-recent-body");
+const sessionPanel = el<HTMLElement>("session-panel");
+const sessionStatus = el<HTMLSpanElement>("session-status");
+const sessionTitle = el<HTMLHeadingElement>("session-title");
+const sessionCost = el<HTMLSpanElement>("session-cost");
+const streamState = el<HTMLSpanElement>("stream-state");
+const sessionMessage = el<HTMLButtonElement>("session-message");
+const sessionInterrupt = el<HTMLButtonElement>("session-interrupt");
+const sessionConsole = el<HTMLButtonElement>("session-console");
+const sessionClose = el<HTMLButtonElement>("session-close");
+const transcript = el<HTMLDivElement>("transcript");
 
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let activeTab: "fleet" | "usage" = "fleet";
+let selectedSessionId: string | null = null;
+let selectedConsoleUrl: string | null = null;
 
 function centsToDollars(cents: string | number): string {
   const n = typeof cents === "number" ? cents : Number(cents);
@@ -235,6 +283,11 @@ function renderSessions(sessions: Session[]) {
     const costCap = cost !== undefined && cap !== undefined ? `${centsToDollars(cost)} / ${centsToDollars(cap)}` : "—";
     const active = s.usage?.active_seconds !== undefined ? `${s.usage.active_seconds.toFixed(1)}s` : "—";
     const tr = document.createElement("tr");
+    tr.dataset.id = s.id;
+    if (s.id === selectedSessionId) {
+      tr.classList.add("selected");
+      renderSessionHead(s);
+    }
     tr.innerHTML = `
       <td><span class="badge ${statusClass(s.status)}">${escapeHtml(s.status)}</span></td>
       <td class="title-cell" title="${escapeHtml(s.id)}">${escapeHtml(s.title ?? s.id)}</td>
@@ -253,28 +306,207 @@ function renderSessions(sessions: Session[]) {
   }
 }
 
+async function messageSession(id: string) {
+  const task = window.prompt("Message to send to this session:");
+  if (task && task.trim()) {
+    await invoke("send_session_event", { id, task });
+    await refresh();
+  }
+}
+
+async function interruptSession(id: string) {
+  if (window.confirm("Interrupt this session's in-flight work?")) {
+    await invoke("interrupt_session", { id });
+    await refresh();
+  }
+}
+
 sessionsBody.addEventListener("click", async (e) => {
-  const button = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-action]");
-  if (!button) return;
-  const action = button.dataset.action;
+  const target = e.target as HTMLElement;
+  const button = target.closest<HTMLButtonElement>("button[data-action]");
   try {
+    if (!button) {
+      const row = target.closest<HTMLTableRowElement>("tr[data-id]");
+      if (row?.dataset.id) await selectSession(row.dataset.id);
+      return;
+    }
+    const action = button.dataset.action;
     if (action === "console" && button.dataset.url) {
       await openUrl(button.dataset.url);
     } else if (action === "message" && button.dataset.id) {
-      const task = window.prompt("Message to send to this session:");
-      if (task && task.trim()) {
-        await invoke("send_session_event", { id: button.dataset.id, task });
-        await refresh();
-      }
+      await messageSession(button.dataset.id);
     } else if (action === "interrupt" && button.dataset.id) {
-      if (window.confirm("Interrupt this session's in-flight work?")) {
-        await invoke("interrupt_session", { id: button.dataset.id });
-        await refresh();
-      }
+      await interruptSession(button.dataset.id);
     }
   } catch (err) {
     showError(String(err));
   }
+});
+
+// ---- selected session: live transcript ------------------------------------
+
+async function selectSession(id: string) {
+  if (id === selectedSessionId) return;
+  selectedSessionId = id;
+  selectedConsoleUrl = null;
+  transcript.innerHTML = "";
+  sessionTitle.textContent = id;
+  sessionStatus.textContent = "—";
+  sessionStatus.className = "badge badge-unknown";
+  sessionCost.textContent = "";
+  setStreamState("connecting");
+  sessionPanel.hidden = false;
+  for (const row of sessionsBody.querySelectorAll<HTMLTableRowElement>("tr[data-id]")) {
+    row.classList.toggle("selected", row.dataset.id === id);
+  }
+  await invoke("watch_session", { id });
+}
+
+async function deselectSession() {
+  selectedSessionId = null;
+  selectedConsoleUrl = null;
+  sessionPanel.hidden = true;
+  transcript.innerHTML = "";
+  for (const row of sessionsBody.querySelectorAll("tr.selected")) row.classList.remove("selected");
+  await invoke("unwatch_session");
+}
+
+function renderSessionHead(s: Session) {
+  sessionTitle.textContent = s.title ?? s.id;
+  sessionTitle.title = s.id;
+  setSessionStatus(s.status);
+  setSessionCost(s.usage, s.budget);
+  selectedConsoleUrl = s.console_url ?? null;
+}
+
+function setSessionStatus(status: string) {
+  sessionStatus.textContent = status;
+  sessionStatus.className = `badge ${statusClass(status)}`;
+}
+
+function setSessionCost(usage: SessionUsage | undefined, budget: SessionBudget | undefined | null) {
+  const cost = usage?.list_cost?.amount;
+  const cap = budget?.max_list_cost?.amount;
+  sessionCost.textContent =
+    cost !== undefined ? `${centsToDollars(cost)}${cap !== undefined ? ` / ${centsToDollars(cap)}` : ""}` : "";
+}
+
+function setStreamState(state: string, message?: string) {
+  streamState.textContent = state;
+  streamState.title = message ?? "event stream";
+  streamState.className = `stream-pill stream-${state === "open" ? "open" : state === "error" ? "error" : state === "reconnecting" ? "reconnecting" : "idle"}`;
+}
+
+function textOf(content: ContentBlock[] | undefined): string {
+  return (content ?? [])
+    .filter((b) => b.type === "text" && typeof b.text === "string")
+    .map((b) => b.text as string)
+    .join("");
+}
+
+function truncate(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+function appendEntry(className: string, text: string, id?: string): HTMLDivElement {
+  const div = document.createElement("div");
+  div.className = `entry ${className}`;
+  div.textContent = text;
+  if (id) div.dataset.eventId = id;
+  transcript.appendChild(div);
+  return div;
+}
+
+function appendToolEntry(summary: string, detail: string) {
+  const details = document.createElement("details");
+  details.className = "entry entry-tool";
+  const s = document.createElement("summary");
+  s.textContent = summary;
+  details.appendChild(s);
+  if (detail) {
+    const pre = document.createElement("div");
+    pre.textContent = truncate(detail, 2000);
+    details.appendChild(pre);
+  }
+  transcript.appendChild(details);
+}
+
+/** Streams a token preview into a placeholder bubble; the persisted event replaces it. */
+function pendingBubble(eventId: string): HTMLDivElement {
+  const existing = transcript.querySelector<HTMLDivElement>(`.entry.pending[data-event-id="${CSS.escape(eventId)}"]`);
+  return existing ?? appendEntry("entry-agent pending", "", eventId);
+}
+
+function renderEvent(ev: SessionEvent) {
+  const atBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
+  switch (ev.type) {
+    case "user.message":
+      appendEntry("entry-user", textOf(ev.content), ev.id);
+      break;
+    case "user.interrupt":
+      appendEntry("entry-system", "interrupt sent", ev.id);
+      break;
+    case "agent.message": {
+      const pending = ev.id ? transcript.querySelector(`.entry.pending[data-event-id="${CSS.escape(ev.id)}"]`) : null;
+      if (pending) pending.remove();
+      appendEntry("entry-agent", textOf(ev.content), ev.id);
+      break;
+    }
+    case "event_start":
+      if (ev.event?.type === "agent.message" && ev.event.id) pendingBubble(ev.event.id);
+      break;
+    case "event_delta":
+      if (ev.event_id && ev.delta?.content?.type === "text" && ev.delta.content.text) {
+        pendingBubble(ev.event_id).textContent += ev.delta.content.text;
+      }
+      break;
+    case "agent.tool_use":
+    case "agent.mcp_tool_use":
+    case "agent.custom_tool_use": {
+      const input = ev.input === undefined ? "" : JSON.stringify(ev.input, null, 1);
+      appendToolEntry(`⚙ ${ev.name ?? ev.type} ${truncate(input.replace(/\s+/g, " "), 120)}`, input);
+      break;
+    }
+    case "agent.tool_result":
+      appendToolEntry(`↳ result ${truncate(textOf(ev.content).replace(/\s+/g, " "), 120)}`, textOf(ev.content));
+      break;
+    case "session.status_running":
+      setSessionStatus("running");
+      appendEntry("entry-system", "running", ev.id);
+      break;
+    case "session.status_idle": {
+      const reason = ev.stop_reason?.type ?? "idle";
+      setSessionStatus(reason === "budget_reached" ? "budget_reached" : "idle");
+      appendEntry(`entry-system${reason === "budget_reached" ? " alert" : ""}`, `idle (${reason})`, ev.id);
+      break;
+    }
+    case "session.status_error":
+    case "session.error":
+      setSessionStatus("failed");
+      appendEntry("entry-system alert", `error: ${ev.error?.message ?? ev.type}`, ev.id);
+      break;
+    case "session.usage":
+      setSessionCost(ev.usage, ev.budget);
+      break;
+    case "agent.thinking":
+    case "span.model_request_start":
+    case "span.model_request_end":
+      break; // noise for this view
+    default:
+      appendEntry("entry-system", ev.type, ev.id);
+  }
+  if (atBottom) transcript.scrollTop = transcript.scrollHeight;
+}
+
+sessionClose.addEventListener("click", () => void deselectSession());
+sessionMessage.addEventListener("click", () => {
+  if (selectedSessionId) messageSession(selectedSessionId).catch((err) => showError(String(err)));
+});
+sessionInterrupt.addEventListener("click", () => {
+  if (selectedSessionId) interruptSession(selectedSessionId).catch((err) => showError(String(err)));
+});
+sessionConsole.addEventListener("click", () => {
+  if (selectedConsoleUrl) openUrl(selectedConsoleUrl).catch((err) => showError(String(err)));
 });
 
 newSessionForm.addEventListener("submit", async (e) => {
@@ -372,6 +604,15 @@ function startPolling() {
 }
 
 async function init() {
+  await listen<SessionEventPayload>("session-event", ({ payload }) => {
+    if (payload.session_id !== selectedSessionId) return; // a stale watcher's last words
+    renderEvent(payload.event);
+  });
+  await listen<StreamStatePayload>("session-stream-state", ({ payload }) => {
+    if (payload.session_id !== selectedSessionId) return;
+    setStreamState(payload.state, payload.message);
+  });
+
   const status = await checkConnection();
   if (status.configured) startPolling();
 

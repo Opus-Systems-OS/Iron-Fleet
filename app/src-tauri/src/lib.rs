@@ -7,6 +7,7 @@
 
 mod commands;
 mod config;
+mod stream;
 
 use config::ControlPlaneConfig;
 use std::path::PathBuf;
@@ -16,8 +17,13 @@ use tauri::Manager;
 
 pub struct AppState {
     pub http: reqwest::Client,
+    /// For the session event stream only: no total timeout, or every stream
+    /// would be cut off at 30s. Connect timeout still applies.
+    pub stream_http: reqwest::Client,
     pub config_path: PathBuf,
     pub config: Mutex<Option<ControlPlaneConfig>>,
+    /// The one live watch (the selected session), aborted on reselect.
+    pub watch: Mutex<Option<commands::Watch>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -28,14 +34,21 @@ pub fn run() {
             let config_path = app.path().app_config_dir()?.join("control-plane.json");
             let config =
                 ControlPlaneConfig::from_env().or_else(|| ControlPlaneConfig::load(&config_path));
+            const UA: &str = concat!("iron-fleet-app/", env!("CARGO_PKG_VERSION"));
             let http = reqwest::Client::builder()
-                .user_agent(concat!("iron-fleet-app/", env!("CARGO_PKG_VERSION")))
+                .user_agent(UA)
                 .timeout(Duration::from_secs(30))
+                .build()?;
+            let stream_http = reqwest::Client::builder()
+                .user_agent(UA)
+                .connect_timeout(Duration::from_secs(10))
                 .build()?;
             app.manage(AppState {
                 http,
+                stream_http,
                 config_path,
                 config: Mutex::new(config),
+                watch: Mutex::new(None),
             });
             Ok(())
         })
@@ -49,6 +62,8 @@ pub fn run() {
             commands::send_session_event,
             commands::interrupt_session,
             commands::get_usage,
+            commands::watch_session,
+            commands::unwatch_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

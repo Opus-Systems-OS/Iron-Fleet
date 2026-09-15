@@ -75,8 +75,22 @@ the whole `practical-compassion` project (it held only the two services
 and the volume). No rollback path to Railway exists now; the droplet's
 `control-plane.db` was a superset of the Railway one, so nothing was lost.
 
-**Next:** Phase 3 (session event streaming), or Phase 6's decisions (link,
-models, GPU sharing) — either can start; they're independent.
+**Phase 3 in progress** (branch `phase-3-session-streaming`, 2026-09-15):
+control-plane gained `GET /sessions/{id}/events` (history) and
+`GET /sessions/{id}/stream` (SSE proxy, byte-for-byte), and `interrupt`
+now sends a `user.interrupt` event — the `/v1/sessions/{id}/interrupt`
+path it used to POST to does not exist. The app's Fleet tab got a
+selected-session transcript fed by a Rust watcher (`app/src-tauri/src/stream.rs`)
+that does the docs' open-stream → list-history → dedupe-on-id dance.
+Verified live from the droplet 2026-09-15 ~18:52 UTC against
+`sesn_01MQMjRaHFhwvhefFsfpVemh`: `GET …/events/stream` → 200
+`text/event-stream`, first frame a `: connected` comment, no `?beta=true`
+needed; `POST …/events [{"type":"user.interrupt"}]` → 200
+`{"data":[{"id":"sevt_01HbQAp29b1FD9cCdBj1dYtA","type":"user.interrupt"}]}`.
+Remaining: merge, `deploy.sh`, then the exit test (a jarvis session
+watched live in the app) — see Phase 3 below.
+
+**Next after that:** Phase 6's decisions (link, models, GPU sharing).
 
 **A new machine needs:**
 
@@ -293,6 +307,24 @@ belongs in `control-plane`, not in a new service.
 This replaces the proposal's "WS /events" and "prompt streaming" —
 same outcome, delivered by proxying what Anthropic already emits rather
 than by inventing an event model.
+
+Verified against platform.claude.com on 2026-09-15 (events-and-streaming,
+session-operations), then live from the droplet:
+
+- Stream is `GET /v1/sessions/{id}/events/stream` with
+  `accept: text/event-stream`; frames are `data: {event}` with the persisted
+  event unchanged (`type`, `id: sevt_…`, `processed_at`, …). First frame is a
+  `: connected` comment. No keepalive documented, no `Last-Event-ID`. Only
+  events emitted after the stream opens are delivered — the reconnect pattern
+  is open stream → `GET …/events` history → dedupe on `id`.
+- Optional `event_deltas[]=agent.message|agent.thinking` adds token-level
+  `event_start`/`event_delta` previews (no `id` of their own).
+- **There is no interrupt route.** Interrupt is `{"type":"user.interrupt"}`
+  on `POST …/events`; the turn ends with an ordinary `session.status_idle`.
+  The control plane's `interrupt_session` posted to a nonexistent path until
+  this phase.
+- The docs' curl examples append `?beta=true` to every URL; it is not
+  required (SDKs don't send it; verified live without it).
 
 **Exit:** app shows a session's agent messages appearing live.
 

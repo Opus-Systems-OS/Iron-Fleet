@@ -5,14 +5,23 @@
 //! out of the page's JS-visible network layer.
 //!
 //! Stage 3 added the read-only dashboard (`GET` only). Stage 4 adds session
-//! controls — start, follow up, interrupt — and the Usage tab. There is still
-//! no way to raise a session's cap: the control plane's budgets are
-//! create-only, so no route exists for it at any layer.
+//! controls — start, follow up, interrupt — and the Usage tab. Phase 3 of
+//! the centralization plan adds `watch_session`: the selected session's live
+//! event stream, delivered to the webview as Tauri events (see `stream.rs`).
+//! There is still no way to raise a session's cap: the control plane's
+//! budgets are create-only, so no route exists for it at any layer.
 
 use crate::config::ControlPlaneConfig;
-use crate::AppState;
+use crate::{stream, AppState};
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
+
+/// A running `stream::watch` task. Dropping the handle does not stop the
+/// task; `abort` does, which is what reselecting a session relies on.
+pub struct Watch {
+    pub session_id: String,
+    handle: tauri::async_runtime::JoinHandle<()>,
+}
 
 #[derive(Debug, Serialize)]
 pub struct ConnectionStatus {
@@ -137,6 +146,45 @@ pub async fn interrupt_session(
 pub async fn get_usage(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let cfg = require_config(&state)?;
     get_json(&state.http, &cfg, "/usage").await
+}
+
+/// Start streaming `id`'s events to the webview as `session-event` /
+/// `session-stream-state` Tauri events, replacing any watch already running.
+/// One watch at a time on purpose: it follows the selected row, and the
+/// Fleet tab has exactly one of those.
+#[tauri::command]
+pub async fn watch_session(
+    id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let cfg = require_config(&state)?;
+    let id = valid_id(id)?;
+    let handle = tauri::async_runtime::spawn(stream::watch(
+        app,
+        state.stream_http.clone(),
+        cfg,
+        id.clone(),
+    ));
+    let previous = state
+        .watch
+        .lock()
+        .expect("watch mutex poisoned")
+        .replace(Watch {
+            session_id: id,
+            handle,
+        });
+    if let Some(prev) = previous {
+        prev.handle.abort();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn unwatch_session(state: State<'_, AppState>) {
+    if let Some(prev) = state.watch.lock().expect("watch mutex poisoned").take() {
+        prev.handle.abort();
+    }
 }
 
 fn valid_id(id: String) -> Result<String, String> {

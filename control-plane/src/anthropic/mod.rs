@@ -22,6 +22,10 @@ pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 #[derive(Clone)]
 pub struct Client {
     http: reqwest::Client,
+    /// For `GET …/events/stream` only: `http` carries a 60s total timeout
+    /// that would cut every SSE stream off; this one has a connect timeout
+    /// and nothing else, so a stream lives until one side hangs up.
+    stream_http: reqwest::Client,
     base_url: String,
     api_key: String,
 }
@@ -36,15 +40,18 @@ impl std::fmt::Debug for Client {
 
 impl Client {
     pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Result<Self> {
+        const UA: &str = concat!("iron-fleet-control-plane/", env!("CARGO_PKG_VERSION"));
         let http = reqwest::Client::builder()
-            .user_agent(concat!(
-                "iron-fleet-control-plane/",
-                env!("CARGO_PKG_VERSION")
-            ))
+            .user_agent(UA)
             .timeout(std::time::Duration::from_secs(60))
+            .build()?;
+        let stream_http = reqwest::Client::builder()
+            .user_agent(UA)
+            .connect_timeout(std::time::Duration::from_secs(10))
             .build()?;
         Ok(Client {
             http,
+            stream_http,
             base_url: base_url.into(),
             api_key: api_key.into(),
         })
@@ -80,12 +87,22 @@ impl Client {
     }
 
     fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
+        self.request_with(&self.http, method, path)
+            .header("accept", "application/json")
+    }
+
+    /// Auth + version only; the caller picks `accept` (reqwest's `.header`
+    /// appends rather than replaces, so it can't be set here and overridden).
+    fn request_with(
+        &self,
+        http: &reqwest::Client,
+        method: Method,
+        path: &str,
+    ) -> reqwest::RequestBuilder {
         let url = format!("{}{}", self.base_url, path);
-        self.http
-            .request(method, &url)
+        http.request(method, &url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("accept", "application/json")
     }
 
     async fn finish<T: DeserializeOwned>(
@@ -216,14 +233,65 @@ impl Client {
             .await
     }
 
-    /// Append events to a running session (e.g. a follow-up `user.message`).
-    /// **Unconfirmed** — see `SendEvents`'s doc comment; no fixture from a live
-    /// run backs this endpoint path yet, unlike the rest of this client.
-    pub async fn send_events(
+    /// Raw event-history envelope (`data`, `next_page`, `prev_page`) for
+    /// `GET /v1/sessions/{id}/events`, passed through unchanged. `query` is
+    /// forwarded as-is (`page`, `limit`, repeated `types[]`).
+    pub async fn list_events_raw(&self, session_id: &str, query: &[(&str, &str)]) -> Result<Value> {
+        self.send::<Value>(
+            Method::GET,
+            &format!("/v1/sessions/{session_id}/events"),
+            query,
+            None::<&()>,
+        )
+        .await
+    }
+
+    /// Open the session's live SSE stream (`GET /v1/sessions/{id}/events/stream`).
+    /// Returns the response with its status already checked, so the caller
+    /// can forward `bytes_stream()` verbatim. Only events emitted after the
+    /// stream opens are delivered (docs: managed-agents/events-and-streaming);
+    /// reconnecting readers list the history afterwards and dedupe on `id`.
+    /// `event_deltas` opts this connection into token-level `event_start` /
+    /// `event_delta` previews for the named types.
+    pub async fn open_event_stream(
         &self,
         session_id: &str,
-        events: Vec<UserMessageEvent>,
-    ) -> Result<Value> {
+        event_deltas: &[String],
+    ) -> Result<reqwest::Response> {
+        let path = format!("/v1/sessions/{session_id}/events/stream");
+        let query: Vec<(&str, &str)> = event_deltas
+            .iter()
+            .map(|d| ("event_deltas[]", d.as_str()))
+            .collect();
+        let resp = self
+            .request_with(&self.stream_http, Method::GET, &path)
+            .header("anthropic-beta", MANAGED_AGENTS_BETA)
+            .header("accept", "text/event-stream")
+            .query(&query)
+            .send()
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let request_id = resp
+                .headers()
+                .get("request-id")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
+            let bytes = resp.bytes().await?;
+            return Err(upstream_error(
+                status,
+                &bytes,
+                request_id,
+                &Method::GET,
+                &path,
+            ));
+        }
+        Ok(resp)
+    }
+
+    /// Append events to a session: a follow-up `user.message`, or
+    /// `user.interrupt` to stop the turn in flight.
+    pub async fn send_events(&self, session_id: &str, events: Vec<SessionEvent>) -> Result<Value> {
         self.send::<Value>(
             Method::POST,
             &format!("/v1/sessions/{session_id}/events"),
@@ -233,16 +301,13 @@ impl Client {
         .await
     }
 
-    /// Stop a session's in-flight work without ending the session. Same
-    /// unconfirmed-endpoint caveat as `send_events`.
+    /// Stop a session's in-flight work without ending the session. This is a
+    /// `user.interrupt` event on the events endpoint — the API has no
+    /// dedicated interrupt route. The interrupted turn ends with an ordinary
+    /// `session.status_idle` (`stop_reason: end_turn`).
     pub async fn interrupt_session(&self, session_id: &str) -> Result<Value> {
-        self.send::<Value>(
-            Method::POST,
-            &format!("/v1/sessions/{session_id}/interrupt"),
-            &[],
-            None::<&()>,
-        )
-        .await
+        self.send_events(session_id, vec![SessionEvent::Interrupt])
+            .await
     }
 }
 

@@ -341,6 +341,14 @@ body {
   background: rgba(77, 163, 255, 0.05);
 }
 
+#sessions-table tbody tr:not(.empty-row) {
+  cursor: pointer;
+}
+
+#sessions-table tbody tr.selected td {
+  background: rgba(77, 163, 255, 0.12);
+}
+
 .empty-row td {
   color: var(--text-dim);
   text-align: center;
@@ -361,4 +369,124 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- selected-session panel (live event stream) ------------------------ */
+
+.session-head {
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.session-head-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.session-head-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.session-title {
+  margin: 0;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+
+.stream-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.stream-open {
+  color: var(--ok);
+  border-color: rgba(52, 199, 123, 0.4);
+}
+
+.stream-reconnecting {
+  color: var(--warn);
+  border-color: rgba(240, 166, 60, 0.4);
+}
+
+.stream-error {
+  color: var(--alert);
+  border-color: rgba(239, 90, 111, 0.4);
+}
+
+.transcript {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.transcript:empty::before {
+  content: "No events yet.";
+  color: var(--text-dim);
+  text-align: center;
+  padding: 20px;
+}
+
+.entry {
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.entry-user {
+  align-self: flex-end;
+  background: rgba(77, 163, 255, 0.16);
+}
+
+.entry-agent {
+  align-self: flex-start;
+  background: rgba(137, 146, 166, 0.12);
+}
+
+.entry-agent.pending {
+  opacity: 0.75;
+}
+
+.entry-tool {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-left: 2px solid var(--border);
+  color: var(--text-dim);
+  font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+}
+
+.entry-tool summary {
+  cursor: pointer;
+}
+
+.entry-system {
+  align-self: center;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.entry-system.alert {
+  color: var(--alert);
 }

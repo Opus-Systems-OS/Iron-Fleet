@@ -18,8 +18,10 @@ All routes except `/healthz` and `/webhooks/*` require
 | `POST /sessions` | `{agent_slug, task, environment?, repositories?}` → creates a Managed Agents session pinned to the synced agent version, with that agent's `max_list_cost` cap and the task as the first `user.message`. `repositories` is extra `https://github.com/<owner>/<repo>` URLs to clone into the sandbox on top of the agent's registry defaults (see "Per-agent vaults and repository mounts"); `400` on an agent with no `github` block. Returns `201 {session_id, status, …, console_url}`. |
 | `GET /sessions?agent_slug=&limit=&page=&order=` | Proxies `GET /v1/sessions`; the Anthropic envelope (`data`, `next_page`, `prev_page`) is returned unchanged except each item gains a `console_url`. |
 | `GET /sessions/{id}` | Proxies `GET /v1/sessions/{id}`; the session object is returned unchanged except for an added `console_url`. |
-| `POST /sessions/{id}/events` | `{task}` → appends one `user.message` to a running session. **Unconfirmed**: unlike the rest of this file, this endpoint path has no fixture from a live run yet — see `anthropic/mod.rs::send_events`'s doc comment. |
-| `POST /sessions/{id}/interrupt` | Stops a session's in-flight work without ending it. Same unconfirmed-endpoint caveat as `/events`. |
+| `POST /sessions/{id}/events` | `{task}` → appends one `user.message` to a session (`POST /v1/sessions/{id}/events`). |
+| `GET /sessions/{id}/events?page=&limit=&types=` | Proxies `GET /v1/sessions/{id}/events`: the session's event history, oldest first, Anthropic envelope (`data`, `next_page`, `prev_page`) unchanged. `types` is comma-separated and fanned out to the API's repeated `types[]`. |
+| `GET /sessions/{id}/stream?event_deltas=` | Proxies `GET /v1/sessions/{id}/events/stream` as SSE, byte-for-byte: each frame is `data: {event}` with the Anthropic event object unchanged. Held open as long as the caller is; only events emitted after the stream opened arrive, so readers open this first, then list `/events` and dedupe on `id` (the documented reconnect pattern). `event_deltas` is a comma-separated subset of `agent.message,agent.thinking` and opts the connection into token-level `event_start`/`event_delta` previews; anything else is `400`. |
+| `POST /sessions/{id}/interrupt` | Stops a session's in-flight work without ending it. Sends a `user.interrupt` event on `/v1/sessions/{id}/events` — the Managed Agents API has no interrupt route; the interrupted turn ends with an ordinary `session.status_idle` (`stop_reason: end_turn`). |
 | `GET /usage` | `{by_agent: [{agent_slug, session_count, total_list_cost_cents, budget_reached_count}], recent: [...session_usage rows]}`. Built entirely from the local `session_usage` rollup — no Anthropic call, so it's only as fresh as the last webhook delivery. |
 | `POST /webhooks/managed-agents` | Anthropic → us. Verifies the Standard Webhooks HMAC, dedupes on event id, handles `session.status_idled` (INFO log) and `session.budget_reached` (WARN log), records a usage rollup. |
 
@@ -235,7 +237,13 @@ eval curl -i $H -H "'content-type: application/json'" -X POST localhost:8080/web
 
 `control-plane/dev/mock-managed-agents.py` is a wire-shape mock of the
 Managed Agents API (asserts the mandatory headers, echoes bodies) for running
-the whole loop with no spend: `ANTHROPIC_BASE_URL=http://127.0.0.1:9999`.
+the whole loop with no spend: `ANTHROPIC_BASE_URL=http://127.0.0.1:9999`. It
+keeps a per-session event history and plays a scripted turn on
+`…/events/stream`, so `GET /sessions/{id}/stream` can be watched locally:
+
+```sh
+curl -N -H 'Authorization: Bearer dev' localhost:8080/sessions/<session_id>/stream
+```
 
 ## Deployment
 
