@@ -52,7 +52,7 @@ Against the real, deployed control plane:
 ```sh
 cd app
 npm install
-CONTROL_PLANE_URL=https://iron-fleet-production.up.railway.app \
+CONTROL_PLANE_URL=https://fleet.opustower.dev \
   CONTROL_PLANE_TOKEN=<the deployed CONTROL_PLANE_TOKEN> \
   npm run tauri dev
 ```

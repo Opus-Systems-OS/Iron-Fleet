@@ -38,8 +38,15 @@ droplet's) are registered and enabled; Anthropic delivers to both.
 
 **Next, in order** (the cut-over list in `deploy/droplet/README.md`):
 
-- (c) Desktop app → in-app connection form → `https://fleet.opustower.dev`,
-  same `CONTROL_PLANE_TOKEN`. Fleet + Usage tabs render.
+- (c) ~~Desktop app → `https://fleet.opustower.dev`~~ — done 2026-09-15
+  ~04:45 UTC from the Windows rig. Same token, only the URL in
+  `%APPDATA%\com.ironfleet.app\control-plane.json` changed; app rebuilt at
+  `9c1b39b`. Fleet tab: four agents (jarvis v5), sessions list. Usage tab:
+  by-agent spend plus recent activity including step (b)'s
+  `sesn_01MANKa4WeWib5ECPymUS9Bs` row — i.e. the droplet's rollups, not
+  Railway's. The Mac still points at Railway until someone opens its
+  connection form (gear icon) and pastes the droplet URL; the token is
+  unchanged.
 - (d) Console: **disable** (not delete) the Railway webhook endpoint.
   Railway dashboard: remove the active deployment of `Iron-Fleet` and
   `mcp-fleet` (keep services, volume, variables — rollback is a redeploy).
@@ -213,7 +220,8 @@ Cut over in this order, each step confirmed before the next:
    Webhooks (`session.status_idled`, `session.budget_reached`). Put the
    new `whsec_` in the droplet's `.env`. Run a session to idle and confirm
    the delivery lands on the droplet.
-6. Point the desktop app at the new URL/token (in-app connection form).
+6. ~~Point the desktop app at the new URL/token (in-app connection form).~~
+   Done 2026-09-15 (Windows); Mac pending, see "Resume here".
 7. Disable — don't delete — the Railway webhook endpoint and stop the
    Railway services. Rollback path stays for a week or two.
 
