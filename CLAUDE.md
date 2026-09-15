@@ -118,7 +118,8 @@ Do not start a stage before the one above it works end to end.
 ## Open decisions
 
 - **Control plane host: the `opustower.dev` droplet** (decided 2026-09-14,
-  reversing the 2026-09-13 Railway decision; plan and phases in
+  reversing the 2026-09-13 Railway decision; plan, phases and **current
+  progress — start at its "Resume here" section** — in
   `docs/centralization-plan.md`, box inventory in `docs/droplet-inventory.md`).
   DigitalOcean nyc1, `198.199.66.109` / `2604:a880:400:d1:0:4:f807:7001`.
   `fleet.opustower.dev` → `control-plane`, `mcp.opustower.dev` → `mcp-fleet`,

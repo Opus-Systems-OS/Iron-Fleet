@@ -1,10 +1,69 @@
 # Centralizing on the droplet — plan
 
-**Status:** Phase 0 complete (2026-09-14); Phase 1 in progress — stack live on the droplet alongside Railway (2026-09-14 evening: TLS, `/healthz`, seeded DB, `GET /agents`, auth, `/usage` all verified; boot sync + smoke sessions waiting on Anthropic credits; `SYNC_ON_BOOT=false` on the box until then). Cut-over not started. Rewritten 2026-09-14 from (a) the
-2026-09-13 draft that lived here and (b) an "Opus Tower OS / Opus API"
-proposal drafted outside this repo without knowledge of what was already
-built. Section "What the outside proposal got wrong" records the
-corrections so the reasoning isn't lost.
+**Status (2026-09-14, late):** Phase 0 done. Phase 1 deployed and mid
+cut-over — see "Resume here" just below. Phase 2+ not started.
+
+## Resume here
+
+Written for whichever machine picks this up next (the Mac session that did
+the work ends here; its Claude memory does not travel). Everything below
+is verified fact as of 2026-09-14 ~04:20 UTC, not plan.
+
+**Live on the droplet** (`/opt/iron-fleet/deploy/droplet`, compose project
+`droplet`, images from GHCR, both public):
+
+- `https://fleet.opustower.dev` → control-plane, `https://mcp.opustower.dev`
+  → mcp-fleet, Let's Encrypt certs, HTTP→HTTPS redirect. Both `/healthz` 200.
+- SQLite seeded from the Railway volume before first boot; `GET /agents`
+  returns the same four `agent_id`s as Railway; `/usage` history intact.
+- Boot sync ran clean with credits: jarvis rolled to **v5** (its MCP URL is
+  now `mcp.opustower.dev`), everything else unchanged, nothing created.
+  `ensure_vault` added the new-URL credential to vault `vlt_011Cf2…`
+  alongside Railway's, so Railway's jarvis still works.
+- Smoke sessions run through the droplet: `sesn_01GqkKoUceeA9ArgNfycBttr`
+  (4¢), `sesn_01EW9VRp6iPHackSvJWwTWJE` (6¢, called `list_agents` via
+  `mcp.opustower.dev` — 200s in Caddy's `access-mcp.log`).
+- Locally-signed webhook → 204, replay deduped, bad signature → 400.
+- Bug found and fixed on the way (PR #4, `26d8b35`): rmcp 3.3 rejected every
+  non-localhost `Host` with 403; `mcp-fleet` now takes `ALLOWED_HOSTS`.
+
+**Railway is still running** and is still the registered webhook endpoint.
+Anthropic's real deliveries go there, not to the droplet, until step (b).
+
+**Next, in order** (the cut-over list in `deploy/droplet/README.md`):
+
+- (b) **Console → Manage → Webhooks → Add endpoint**
+  `https://fleet.opustower.dev/webhooks/managed-agents`, events
+  `session.status_idled` + `session.budget_reached`. Put the new `whsec_`
+  into the droplet's `.env` (`ANTHROPIC_WEBHOOK_SIGNING_KEY`), then
+  `docker compose up -d control-plane`. Run any jarvis session to idle and
+  confirm `session idled` appears in `docker compose logs control-plane`
+  on the droplet and the row shows in `GET /usage`. Keep Railway's endpoint
+  enabled until (d).
+- (c) Desktop app → in-app connection form → `https://fleet.opustower.dev`,
+  same `CONTROL_PLANE_TOKEN`. Fleet + Usage tabs render.
+- (d) Console: **disable** (not delete) the Railway webhook endpoint.
+  Railway dashboard: remove the active deployment of `Iron-Fleet` and
+  `mcp-fleet` (keep services, volume, variables — rollback is a redeploy).
+- Then mark Phase 1 complete here and strike the steps.
+
+**A new machine needs:**
+
+1. Its own SSH key on the droplet. Only the Mac's `id_ed25519` is in
+   `root@198.199.66.109:~/.ssh/authorized_keys`. Generate one
+   (`ssh-keygen -t ed25519`), then append its `.pub` from a machine that
+   already has access (Mac Terminal.app:
+   `ssh root@198.199.66.109 "echo '<pub line>' >> ~/.ssh/authorized_keys"`)
+   or via the DigitalOcean web console.
+2. `gh auth login` (PR merges) and `git`.
+3. Nothing from Railway — the DB copy and `.env` are done. `railway` CLI
+   only matters again for Phase 2 teardown.
+4. No secrets: everything the droplet needs is already in its `.env`.
+   Read variable *names* only, never `cat .env` into a chat.
+
+**Day-to-day on the droplet:** `ssh root@198.199.66.109
+/opt/iron-fleet/deploy/droplet/deploy.sh` after any merge to `main` that
+rebuilt an image (`gh run list --workflow images.yml`).
 
 ## What exists today (do not rebuild)
 
