@@ -1,6 +1,6 @@
 # Centralizing on the droplet — plan
 
-**Status:** Phase 0 complete (2026-09-14); Phase 1 in progress — `deploy/droplet/` written, not yet deployed. Rewritten 2026-09-14 from (a) the
+**Status:** Phase 0 complete (2026-09-14); Phase 1 in progress — stack live on the droplet alongside Railway (2026-09-14 evening: TLS, `/healthz`, seeded DB, `GET /agents`, auth, `/usage` all verified; boot sync + smoke sessions waiting on Anthropic credits; `SYNC_ON_BOOT=false` on the box until then). Cut-over not started. Rewritten 2026-09-14 from (a) the
 2026-09-13 draft that lived here and (b) an "Opus Tower OS / Opus API"
 proposal drafted outside this repo without knowledge of what was already
 built. Section "What the outside proposal got wrong" records the
