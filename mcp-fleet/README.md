@@ -107,7 +107,7 @@ curl localhost:8090/healthz
 
 | Variable | Required | Notes |
 |---|---|---|
-| `CONTROL_PLANE_URL` | yes | e.g. `https://iron-fleet-production.up.railway.app`. |
+| `CONTROL_PLANE_URL` | yes | On the droplet, `http://control-plane:8080` over the compose network. |
 | `CONTROL_PLANE_TOKEN` | yes | |
 | `MCP_FLEET_TOKEN` | yes | Must match `agents/jarvis.json`'s `${MCP_FLEET_TOKEN}` substitution. |
 | `PORT` | no | Default `8090`. |
@@ -116,13 +116,10 @@ curl localhost:8090/healthz
 
 ## Deployment
 
-Runs as its own Railway service, `mcp-fleet`, in the same project as
-`control-plane` (`practical-compassion`) — same repo, `mcp-fleet/Dockerfile`
-as the build source, a generated `*.up.railway.app` domain. Not yet folded
-into `.railway/railway.ts`'s tracked history the way `control-plane`'s
-first deploy was (CLAUDE.md's "Open decisions" section only records
-`control-plane`'s Railway hosting; this repo's own IaC file is now the
-source of truth for both services going forward — `railway config pull`
-picks up drift). `CONTROL_PLANE_URL`, `CONTROL_PLANE_TOKEN`, and
-`MCP_FLEET_TOKEN` are set to match `control-plane`'s own values;
-`control-plane`'s `MCP_FLEET_URL` points back at this service's domain.
+Live at `https://mcp.opustower.dev`, a container beside `control-plane` on
+the `opustower.dev` droplet — see `deploy/droplet/README.md` for the compose
+file, Caddyfile and `.env` names. `CONTROL_PLANE_TOKEN` and
+`MCP_FLEET_TOKEN` match `control-plane`'s own values; `control-plane`'s
+`MCP_FLEET_URL` is `https://mcp.opustower.dev/mcp`, which is the URL
+`agents/jarvis.json` resolves to and the key `ensure_vault` stores the
+credential under.

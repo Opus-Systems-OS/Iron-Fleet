@@ -2,10 +2,9 @@
 #
 # Build context is the REPO ROOT (needs the workspace Cargo.toml), so build
 # with:   docker build -f mcp-fleet/Dockerfile .
-# Where this actually runs is an open decision (CLAUDE.md documents only
-# control-plane's Railway hosting so far) — it needs the same thing
-# control-plane needed: a public HTTPS endpoint, since Anthropic's Managed
-# Agents session reaches it as a remote `mcp_servers` URL.
+# Runs on the droplet beside control-plane (deploy/droplet/), because it
+# needs the same thing control-plane needs: a public HTTPS endpoint, since
+# Anthropic's Managed Agents session reaches it as a remote `mcp_servers` URL.
 
 # ---- build ---------------------------------------------------------------
 FROM rust:1-bookworm AS build

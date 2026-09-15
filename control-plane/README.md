@@ -13,7 +13,7 @@ All routes except `/healthz` and `/webhooks/*` require
 
 | Route | What it does |
 |---|---|
-| `GET /healthz` | Liveness. Railway's healthcheck. |
+| `GET /healthz` | Liveness. The deploy's healthcheck. |
 | `GET /agents` | The registry as synced: slug, Anthropic agent id/version, cap, effort, default environment. |
 | `POST /sessions` | `{agent_slug, task, environment?, repositories?}` → creates a Managed Agents session pinned to the synced agent version, with that agent's `max_list_cost` cap and the task as the first `user.message`. `repositories` is extra `https://github.com/<owner>/<repo>` URLs to clone into the sandbox on top of the agent's registry defaults (see "Per-agent vaults and repository mounts"); `400` on an agent with no `github` block. Returns `201 {session_id, status, …, console_url}`. |
 | `GET /sessions?agent_slug=&limit=&page=&order=` | Proxies `GET /v1/sessions`; the Anthropic envelope (`data`, `next_page`, `prev_page`) is returned unchanged except each item gains a `console_url`. |
@@ -38,8 +38,8 @@ mean) with `upstream_status` and `request_id` for the support ticket.
 | `MCP_FLEET_TOKEN` | no | Independent of the URL. When also set, provisions (once) a vault + `static_bearer` credential authenticating `mcp-fleet` and attaches it to every session's `vault_ids`. Without it, `mcp-fleet` connections are attempted unauthenticated. See `mcp-fleet/README.md`. |
 | `BLUEWEB_GITHUB_TOKEN` | yes* | Classic GitHub PAT (`repo`, `workflow`, `read:org`) for `blueweb-client`: becomes the sandbox's `GH_TOKEN` and the token that clones its repository mounts. *Required only because `agents/blueweb-client.json` names it — sync fails loud if a referenced `from_env` is unset. |
 | `BLUEWEB_CLOUDFLARE_API_TOKEN` | yes* | Cloudflare API token (Pages: Read) for `blueweb-client`: the sandbox's `CLOUDFLARE_API_TOKEN`. Same rule. |
-| `PORT` | no | Railway injects it. Default `8080`. |
-| `DATABASE_PATH` | no | Default `$RAILWAY_VOLUME_MOUNT_PATH/control-plane.db`, else `./control-plane.db`. |
+| `PORT` | no | Default `8080`. |
+| `DATABASE_PATH` | no | Default `./control-plane.db`; `/data/control-plane.db` on the droplet. |
 | `AGENTS_DIR` | no | Default `./agents`; `/app/agents` in the image. |
 | `SYNC_ON_BOOT` | no | Default `true`. |
 | `ANTHROPIC_WORKSPACE` | no | Default `default`. Only used to build the Console trace URL. |
@@ -145,7 +145,7 @@ attached only to *that agent's* sessions — unlike the mcp-fleet vault below,
 which rides on every session. The secret is read from `from_env` at sync
 time and sent straight to Anthropic; the registry never holds it, the logs
 never print it (`CredentialAuth`'s `Debug` redacts), and SQLite keeps only a
-SHA-256 over `(value, allowed_hosts)` so a rotated Railway variable becomes an
+SHA-256 over `(value, allowed_hosts)` so a rotated `.env` value becomes an
 in-place credential update on the next sync. Two kinds:
 
 - `environment_variable`: inside the sandbox the variable holds an opaque
@@ -237,43 +237,23 @@ eval curl -i $H -H "'content-type: application/json'" -X POST localhost:8080/web
 Managed Agents API (asserts the mandatory headers, echoes bodies) for running
 the whole loop with no spend: `ANTHROPIC_BASE_URL=http://127.0.0.1:9999`.
 
-## Railway deployment
+## Deployment
 
-Live at `https://iron-fleet-production.up.railway.app` — project
-`practical-compassion`, service `Iron-Fleet`, environment `production`,
-connected to this GitHub repo so a push to `main` deploys.
-
-`.railway/railway.ts` is the project's Infrastructure-as-Code file, imported
-from the live project with `railway config pull` and cleaned. `railway config
-plan` should report no changes; review any diff before `railway config apply`.
-It needs the authoring package: `cd .railway && npm install railway`
-(`node_modules` is gitignored there).
-
-What the service config amounts to, if it ever has to be recreated by hand:
-
-```sh
-railway link --project practical-compassion --environment production --service Iron-Fleet
-railway environment edit --json <<'JSON'
-{"services":{"<service-id>":{"build":{"builder":"DOCKERFILE","dockerfilePath":"control-plane/Dockerfile"},
-  "deploy":{"healthcheckPath":"/healthz","healthcheckTimeout":120}}}}
-JSON
-railway volume add -m /data
-railway variable set DATABASE_PATH=/data/control-plane.db SYNC_ON_BOOT=true RUST_LOG=info,tower_http=info --skip-deploys
-railway variable set ANTHROPIC_API_KEY=sk-ant-... ANTHROPIC_WEBHOOK_SIGNING_KEY=whsec_... \
-                     CONTROL_PLANE_TOKEN=$(openssl rand -hex 32) --skip-deploys
-railway domain            # public HTTPS URL for the webhook
-railway up --detach       # or push to main
-```
+Live at `https://fleet.opustower.dev` on the `opustower.dev` droplet, as a
+container behind Caddy. Everything about the box — compose file, Caddyfile,
+`.env` variable names, first-deploy seeding, day-to-day deploys — is in
+`deploy/droplet/README.md`. Images are built by
+`.github/workflows/images.yml` on every push to `main` and pushed to GHCR;
+the droplet pulls, never builds.
 
 Webhook registration is Console-only: **Manage → Webhooks** → add
-`https://<domain>/webhooks/managed-agents`, subscribed to
+`https://fleet.opustower.dev/webhooks/managed-agents`, subscribed to
 `session.status_idled` and `session.budget_reached`. Copy the `whsec_…` shown
-once into `ANTHROPIC_WEBHOOK_SIGNING_KEY`; the variable change redeploys.
+once into `ANTHROPIC_WEBHOOK_SIGNING_KEY` in the droplet's `.env` and
+`docker compose up -d control-plane`.
 
-The image runs as root: Railway volumes are root-owned and the platform's own
-fix for non-root images is `RAILWAY_RUN_UID=0`. Volumes are single-replica; do
-not scale this service horizontally (SQLite would not survive it anyway).
-
+The image runs as root (the `/data` named volume is root-owned). One
+replica only — SQLite would not survive a second.
 ## Not in this service
 
 Notification delivery (the webhook logs only), any UI, `mcp-fleet`. Session

@@ -1,9 +1,9 @@
-# Iron-Fleet control plane — Railway deployment image.
+# Iron-Fleet control plane — deployment image.
 #
 # Build context is the REPO ROOT (the workspace Cargo.toml and agents/ are
 # needed), so build with:   docker build -f control-plane/Dockerfile .
-# Railway does this for you when the service's Dockerfile path is
-# control-plane/Dockerfile and the root directory is the repo root.
+# .github/workflows/images.yml does this on every push to main and pushes
+# the result to GHCR; the droplet only ever pulls.
 
 # ---- build ---------------------------------------------------------------
 FROM rust:1-bookworm AS build
@@ -44,11 +44,10 @@ COPY --from=build /src/target/release/control-plane /usr/local/bin/control-plane
 # The committed fleet definition ships in the image; boot sync reads it.
 COPY agents /app/agents
 
-# Runs as root on purpose: Railway volumes are mounted root-owned and Railway's
-# documented workaround for non-root images is RAILWAY_RUN_UID=0 anyway. The
-# process only ever writes to the volume path.
+# Runs as root on purpose: the Docker named volume for /data is root-owned.
+# The process only ever writes to the volume path.
 ENV AGENTS_DIR=/app/agents \
     RUST_LOG=info,tower_http=info
-# Railway injects PORT; 8080 is the local default.
+# PORT is set by the compose file; 8080 is the local default.
 EXPOSE 8080
 CMD ["control-plane", "serve"]

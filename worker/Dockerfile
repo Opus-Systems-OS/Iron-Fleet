@@ -2,7 +2,7 @@
 #
 # Build context is the REPO ROOT (needs the workspace Cargo.toml), so build
 # with:   docker build -f worker/Dockerfile .
-# This does not run on Railway — it runs on the rig itself, started manually
+# This does not run on the droplet — it runs on the rig itself, started manually
 # or via a systemd unit / docker compose on that machine.
 
 # ---- build ---------------------------------------------------------------

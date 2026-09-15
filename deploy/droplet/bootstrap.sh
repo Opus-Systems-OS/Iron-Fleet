@@ -75,7 +75,7 @@ mkdir -p /root/seed
 cat <<'NEXT'
 
 bootstrap done. Next, in this order (see deploy/droplet/README.md):
-  1. seed the database:   /root/seed/control-plane.db  (copied off the Railway volume)
+  1. seed the database:   /root/seed/control-plane.db  (a backup of the live one)
   2. fill in:             /opt/iron-fleet/deploy/droplet/.env
   3. first start:         /opt/iron-fleet/deploy/droplet/deploy.sh
 NEXT

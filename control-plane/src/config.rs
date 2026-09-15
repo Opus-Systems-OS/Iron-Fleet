@@ -62,13 +62,9 @@ impl Config {
             None => 8080,
         };
 
-        // Railway mounts the volume at RAILWAY_VOLUME_MOUNT_PATH; DATABASE_PATH wins if set.
+        // The droplet compose file sets DATABASE_PATH to the mounted volume.
         let database_path = optional("DATABASE_PATH")
             .map(PathBuf::from)
-            .or_else(|| {
-                optional("RAILWAY_VOLUME_MOUNT_PATH")
-                    .map(|dir| PathBuf::from(dir).join("control-plane.db"))
-            })
             .unwrap_or_else(|| PathBuf::from("control-plane.db"));
 
         let sync_on_boot = match optional("SYNC_ON_BOOT").as_deref() {
