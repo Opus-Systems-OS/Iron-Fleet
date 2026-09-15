@@ -1,0 +1,16 @@
+# Automatic HTTPS (Let's Encrypt, HTTP-01 on :80). Both hosts are DNS-only in
+# Cloudflare — the proxy must stay off or ACME and the MCP callbacks break.
+
+fleet.opustower.dev {
+	reverse_proxy control-plane:8080
+	log {
+		output file /data/access-fleet.log
+	}
+}
+
+mcp.opustower.dev {
+	reverse_proxy mcp-fleet:8090
+	log {
+		output file /data/access-mcp.log
+	}
+}

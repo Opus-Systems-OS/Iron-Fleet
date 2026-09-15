@@ -1,6 +1,6 @@
 # Centralizing on the droplet — plan
 
-**Status:** Phase 0 complete (2026-09-14); Phase 1 not started. Rewritten 2026-09-14 from (a) the
+**Status:** Phase 0 complete (2026-09-14); Phase 1 in progress — `deploy/droplet/` written, not yet deployed. Rewritten 2026-09-14 from (a) the
 2026-09-13 draft that lived here and (b) an "Opus Tower OS / Opus API"
 proposal drafted outside this repo without knowledge of what was already
 built. Section "What the outside proposal got wrong" records the
@@ -111,27 +111,39 @@ Everything goes in `deploy/droplet/` in this repo:
   unless-stopped`.
 - `Caddyfile`: two sites, automatic TLS, reverse proxy to the two
   containers. Access logs on.
-- `.env.example` listing every variable from the two READMEs. Real `.env`
-  on the box only, `chmod 600`.
-- `deploy.sh`: `git pull && docker compose build && docker compose up -d`.
+- `env.example` (no leading dot — `.gitignore` drops `.env.*`) listing
+  every variable from the two READMEs. Real `.env` on the box only,
+  `chmod 600`, filled by piping `railway variables --kv` over SSH so values
+  never land in a chat or a Mac-side file.
+- `deploy.sh`: `git pull && docker compose pull && docker compose up -d`.
   Manual deploy from the box is fine at this scale; GitHub Actions →
   SSH → deploy.sh is a later nicety, not a requirement.
-- Builds: even with swap, a Rust release build on 1 vCPU / 961 MB is slow
-  and may still OOM. Default to building images on the Mac
-  (`docker build --platform linux/amd64`) and shipping with
-  `docker save | ssh root@droplet docker load`; the droplet is run-only.
+- `README.md`: the runbook.
+- Builds: a Rust release build on 1 vCPU / 961 MB is out. Images are
+  built by GitHub Actions (`.github/workflows/images.yml`) on every push to
+  `main` and pushed to `ghcr.io/opus1247/iron-fleet/{control-plane,mcp-fleet}`;
+  the droplet is run-only (`docker compose pull`). Decided 2026-09-14 over
+  building on the Mac — a Rust build under amd64 emulation on Apple Silicon
+  is 20–40 min per deploy and ties deploys to the laptop.
 
 Run **alongside** Railway, not instead of it:
 
-1. Bring both containers up on the droplet with a fresh, empty SQLite.
-   Registry sync on boot recreates nothing (agents already exist on
-   Anthropic — sync matches by content hash) — verify with `GET /agents`.
-2. Same checks used for the Railway deploy: `/healthz` on both, a bearer
-   `GET /agents`, a `POST /sessions` for `jarvis` with a trivial task, a
-   locally-signed webhook to `/webhooks/managed-agents`.
-3. Copy the live `control-plane.db` off the Railway volume so
-   `session_usage` history survives. SQLite is a file; stop the droplet
-   container, replace, start.
+1. **Seed the droplet's SQLite from the Railway volume first**
+   (`railway volume files download`, checkpoint the WAL locally, drop the
+   file into the `cp_data` volume before the first start). The earlier
+   draft said "fresh, empty SQLite; sync recreates nothing" — wrong:
+   `registry/sync.rs` consults only the local DB, so an empty one would
+   create a second `rig-gpu` environment (new key, rig orphaned), collide
+   on the immutable skill name, and duplicate every agent and vault. The
+   copy also carries `session_usage` history for free.
+2. Bring the three containers up. Boot sync should report everything
+   unchanged except `jarvis` (one new version, its `${MCP_FLEET_URL}`
+   changed) and `ensure_vault` adding a credential for the new MCP URL
+   alongside Railway's — Railway's jarvis keeps working during overlap.
+3. Same checks used for the Railway deploy: `/healthz` on both, a bearer
+   `GET /agents` returning the same agent ids as Railway, a
+   `POST /sessions` for `jarvis` with a trivial task, a locally-signed
+   webhook to `/webhooks/managed-agents`.
 
 Cut over in this order, each step confirmed before the next:
 
