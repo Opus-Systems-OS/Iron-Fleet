@@ -111,6 +111,7 @@ curl localhost:8090/healthz
 | `CONTROL_PLANE_TOKEN` | yes | |
 | `MCP_FLEET_TOKEN` | yes | Must match `agents/jarvis.json`'s `${MCP_FLEET_TOKEN}` substitution. |
 | `PORT` | no | Default `8090`. |
+| `ALLOWED_HOSTS` | yes, when deployed | Comma-separated `Host` header values `/mcp` accepts. rmcp's Streamable HTTP server has DNS-rebinding protection that defaults to `localhost,127.0.0.1,::1` and answers **403** to anything else — invisible in local testing, fatal behind a real hostname (found 2026-09-14 on the droplet: Anthropic's sessions reached `mcp.opustower.dev` and every call was rejected). Set to the public hostname, e.g. `mcp.opustower.dev`. Unset keeps the local default so `cargo run` works. |
 | `RUST_LOG` | no | Default `info`. |
 
 ## Deployment

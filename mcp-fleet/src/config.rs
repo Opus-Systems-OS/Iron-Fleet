@@ -14,6 +14,14 @@ pub struct Config {
     /// call the control plane's full API."
     pub mcp_fleet_token: String,
     pub port: u16,
+    /// `Host` header values rmcp's Streamable HTTP server accepts on `/mcp`.
+    /// Its default is `localhost`/`127.0.0.1`/`::1` — DNS-rebinding
+    /// protection meant for servers on a developer's machine — which
+    /// silently 403s every request that arrives through a real hostname.
+    /// Deployed behind Caddy this must name the public host
+    /// (`mcp.opustower.dev`); the default stays the local set so `cargo run`
+    /// keeps working unchanged.
+    pub allowed_hosts: Vec<String>,
 }
 
 impl std::fmt::Debug for Config {
@@ -23,6 +31,7 @@ impl std::fmt::Debug for Config {
             .field("control_plane_token", &"<redacted>")
             .field("mcp_fleet_token", &"<redacted>")
             .field("port", &self.port)
+            .field("allowed_hosts", &self.allowed_hosts)
             .finish()
     }
 }
@@ -55,6 +64,16 @@ impl Config {
             None => 8090,
         };
 
+        let allowed_hosts = match optional("ALLOWED_HOSTS") {
+            Some(list) => list
+                .split(',')
+                .map(str::trim)
+                .filter(|h| !h.is_empty())
+                .map(str::to_owned)
+                .collect(),
+            None => vec!["localhost".into(), "127.0.0.1".into(), "::1".into()],
+        };
+
         Ok(Config {
             control_plane_url: required("CONTROL_PLANE_URL")?
                 .trim_end_matches('/')
@@ -62,6 +81,7 @@ impl Config {
             control_plane_token: required("CONTROL_PLANE_TOKEN")?,
             mcp_fleet_token: required("MCP_FLEET_TOKEN")?,
             port,
+            allowed_hosts,
         })
     }
 }
