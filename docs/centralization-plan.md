@@ -1,9 +1,9 @@
 # Centralizing on the droplet — plan
 
-**Status (2026-09-15, ~05:00 UTC):** Phases 0 and 1 done — the droplet is
-the only control plane; Railway is stopped but not deleted. Phase 2
-(delete Railway) waits for the soak period, earliest 2026-09-22. Phase 6
-(local inference on the rig) added 2026-09-15, decisions still open.
+**Status (2026-09-15, ~05:15 UTC):** Phases 0–2 done — the droplet is the
+only deployment; the Railway project is deleted and the repo has no Railway
+config left. Phases 3–5 not started. Phase 6 (local inference on the rig)
+added 2026-09-15, decisions still open.
 
 ## Resume here
 
@@ -66,8 +66,14 @@ The cut-over list from `deploy/droplet/README.md`, all done:
 URL until its gear-icon form is set to `https://fleet.opustower.dev` (same
 token). Thirty seconds, first thing on the Mac.
 
-**Next:** Phase 2, after the soak — earliest 2026-09-22. Phase 6's
-decisions (link, models, GPU sharing) can be made any time.
+**Phase 2 done 2026-09-15 ~05:15 UTC**, a week ahead of the planned soak
+by the user's call: repo cleanup in `68f7ad2`, then `railway delete` of
+the whole `practical-compassion` project (it held only the two services
+and the volume). No rollback path to Railway exists now; the droplet's
+`control-plane.db` was a superset of the Railway one, so nothing was lost.
+
+**Next:** Phase 3 (session event streaming), or Phase 6's decisions (link,
+models, GPU sharing) — either can start; they're independent.
 
 **A new machine needs:**
 
@@ -250,14 +256,22 @@ repoint pending, see "Resume here").
 
 ### Phase 2 — Decommission Railway
 
-- After the soak period: delete the Railway services and volume.
-- Remove `.railway/`, the "Railway deployment" section of
-  `control-plane/README.md`, the Railway paragraph in `mcp-fleet/README.md`.
-  Replace with pointers to `deploy/droplet/`.
-- `PORT`/`DATABASE_PATH` defaults that mention Railway env vars in
-  `control-plane` config: leave the code, update the comments.
+Done 2026-09-15 (`68f7ad2` + `railway delete`), without the soak.
 
-**Exit:** no Railway references outside git history.
+- ~~After the soak period: delete the Railway services and volume.~~ The
+  whole project was deleted; it held nothing else.
+- ~~Remove `.railway/`, the "Railway deployment" section of
+  `control-plane/README.md`, the Railway paragraph in `mcp-fleet/README.md`.
+  Replace with pointers to `deploy/droplet/`.~~
+- ~~`PORT`/`DATABASE_PATH` defaults that mention Railway env vars in
+  `control-plane` config: leave the code, update the comments.~~ The
+  `RAILWAY_VOLUME_MOUNT_PATH` fallback was removed rather than kept — dead
+  code once the compose file sets `DATABASE_PATH`, and leaving it would
+  have failed this phase's own exit criterion.
+
+**Exit:** ~~no Railway references outside git history~~ — met; what
+remains is this plan, `docs/droplet-inventory.md`, and a history note in
+`deploy/droplet/README.md`.
 
 ### Phase 3 — Session event streaming
 
