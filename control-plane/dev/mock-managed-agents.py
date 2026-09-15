@@ -240,6 +240,12 @@ class H(BaseHTTPRequestHandler):
                         return self._json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": err}})
                     if "networking" in auth:
                         c["auth"]["networking"] = auth["networking"]
+                elif auth["type"] == "static_bearer":
+                    # Only `token` may change; mcp_server_url is immutable.
+                    extra = set(auth.keys()) - {"type", "token"}
+                    if extra:
+                        return self._json(400, {"type": "error", "error": {"type": "invalid_request_error",
+                                                "message": f"static_bearer update: unknown/immutable field {sorted(extra)[0]!r}"}})
             if body.get("display_name"):
                 c["display_name"] = body["display_name"]
             return self._json(200, c)

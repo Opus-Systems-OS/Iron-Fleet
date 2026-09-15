@@ -129,26 +129,49 @@ verbatim `agent` body (so neither touches the agent's definition hash):
 
 ```jsonc
 "credentials": [
-  { "secret_name": "GH_TOKEN", "from_env": "BLUEWEB_GITHUB_TOKEN",
-    "allowed_hosts": ["api.github.com", "github.com", "uploads.github.com"] }
+  { "type": "environment_variable", "secret_name": "GH_TOKEN",
+    "from_env": "BLUEWEB_GITHUB_TOKEN",
+    "allowed_hosts": ["api.github.com", "github.com", "uploads.github.com"] },
+  { "type": "static_bearer", "mcp_server_url": "https://api.githubcopilot.com/mcp/",
+    "from_env": "BLUEWEB_GITHUB_TOKEN" }
 ],
 "github": { "token_env": "BLUEWEB_GITHUB_TOKEN",
             "mount": ["https://github.com/Opus1247/Iron-Fleet"] }
 ```
 
-**`credentials`** → one vault per agent (`agent_vaults`), one
-`environment_variable` credential per entry (`agent_credentials`), attached
-only to *that agent's* sessions — unlike the mcp-fleet vault below, which
-rides on every session. The secret is read from `from_env` at sync time and
-sent straight to Anthropic; the registry never holds it, the logs never print
-it (`CredentialAuth`'s `Debug` redacts), and SQLite keeps only a SHA-256 over
-`(value, allowed_hosts)` so a rotated Railway variable becomes an in-place
-credential update on the next sync. Inside the sandbox the variable holds an
-opaque placeholder that Anthropic substitutes at egress, in request headers
-only, on the listed hosts only — which is why `gh` and `wrangler` work but a
-plain `git push` (HTTP Basic, base64) does not; the skill's
-`references/preflight.md` documents the `http.extraHeader` form. Cloud
-sandboxes only; `gpu-compute` cannot use these.
+**`credentials`** → one vault per agent (`agent_vaults`), one credential per
+entry (`agent_credentials`, keyed by `secret_name` or `mcp_server_url`),
+attached only to *that agent's* sessions — unlike the mcp-fleet vault below,
+which rides on every session. The secret is read from `from_env` at sync
+time and sent straight to Anthropic; the registry never holds it, the logs
+never print it (`CredentialAuth`'s `Debug` redacts), and SQLite keeps only a
+SHA-256 over `(value, allowed_hosts)` so a rotated Railway variable becomes an
+in-place credential update on the next sync. Two kinds:
+
+- `environment_variable`: inside the sandbox the variable holds an opaque
+  placeholder that Anthropic substitutes at egress, in request headers only,
+  on the listed hosts only. Right for CLIs that send the token verbatim —
+  `gh`, `wrangler`. **Not** for `git push`: GitHub's git endpoint accepts only
+  HTTP Basic auth, which base64-encodes the token, so the placeholder never
+  matches (verified 2026-09-14 — Bearer/`token` headers get 401 from GitHub
+  even with a real token).
+- `static_bearer`: a token for one of the agent's own `mcp_servers`, matched
+  by exact URL at runtime; load fails if no server declares that URL. This is
+  how `blueweb-client` pushes — through the GitHub MCP server's `push_files`
+  / `create_pull_request`, which the skill's `references/preflight.md` walks
+  through.
+
+Cloud sandboxes only; `gpu-compute` cannot use these.
+
+**MCP toolsets must carry an explicit permission policy.** Anthropic's default
+for `mcp_toolset` is `always_ask`, which pauses the session
+(`stop_reason: requires_action`) until a client sends a
+`user.tool_confirmation` — and nothing in this fleet does, so a toolset
+without `default_config.permission_policy` is a session that silently hangs
+on its first MCP call. Registry load rejects it. `always_allow` is the only
+policy that never stalls (`auto` can still pause on "indeterminate"); the
+spend guard is the per-session cap, not a human click. A confirmation loop
+in the Fleet Dashboard is the feature that would relax this.
 
 **`github`** → every session of the agent mounts the `mount` repos as
 `github_repository` resources under `/workspace/<repo>`, authenticated with

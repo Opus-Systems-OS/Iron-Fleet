@@ -44,6 +44,13 @@ pub struct ModelConfig {
 }
 
 /// Body of `POST /v1/agents` and (minus nothing — full replace) `POST /v1/agents/{id}`.
+///
+/// The array fields are always serialized, empty or not. On update, Anthropic
+/// *preserves* an omitted field and *clears* an explicit `[]` — so omitting an
+/// empty `mcp_servers` after removing a server from the registry would leave
+/// the old server on the live agent while `tools` lost its toolset, and the
+/// update would 400 (`mcp_servers [x] declared but no mcp_toolset references
+/// them`). Sending `[]` keeps the apply declarative.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDefinition {
     pub name: String,
@@ -54,9 +61,9 @@ pub struct AgentDefinition {
     pub description: Option<String>,
     #[serde(default)]
     pub tools: Vec<Value>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub mcp_servers: Vec<Value>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub skills: Vec<Value>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
@@ -347,6 +354,9 @@ pub struct CredentialUpdate {
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CredentialAuthUpdate {
+    StaticBearer {
+        token: String,
+    },
     EnvironmentVariable {
         secret_value: String,
         networking: CredentialNetworking,
@@ -356,6 +366,10 @@ pub enum CredentialAuthUpdate {
 impl std::fmt::Debug for CredentialAuthUpdate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            CredentialAuthUpdate::StaticBearer { .. } => f
+                .debug_struct("StaticBearer")
+                .field("token", &"<redacted>")
+                .finish(),
             CredentialAuthUpdate::EnvironmentVariable { networking, .. } => f
                 .debug_struct("EnvironmentVariable")
                 .field("secret_value", &"<redacted>")
@@ -515,6 +529,24 @@ mod tests {
         fresh["usage"]["list_cost"]["amount"] = serde_json::json!("0");
         let s: Session = serde_json::from_value(fresh).unwrap();
         assert!(s.usage.unwrap().list_cost.unwrap().amount.is_zero());
+    }
+
+    #[test]
+    fn agent_update_sends_empty_arrays_so_removals_apply() {
+        // Regression: 2026-09-14 the live agent kept an mcp_servers entry the
+        // registry had dropped, because the empty array was omitted and
+        // Anthropic preserves omitted fields on update.
+        let def: AgentDefinition = serde_json::from_str(
+            r#"{"name":"A","model":{"id":"claude-opus-5"},"tools":[{"type":"agent_toolset_20260401"}]}"#,
+        )
+        .unwrap();
+        let v = serde_json::to_value(&def).unwrap();
+        assert_eq!(v["mcp_servers"], serde_json::json!([]));
+        assert_eq!(v["skills"], serde_json::json!([]));
+        assert_eq!(
+            v["tools"],
+            serde_json::json!([{"type":"agent_toolset_20260401"}])
+        );
     }
 
     #[test]

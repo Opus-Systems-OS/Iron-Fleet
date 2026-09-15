@@ -45,7 +45,8 @@ means editing one data file.
 Check before the first customer site, and re-check if any step below errors on
 authentication. Full detail in `references/preflight.md` — and if `GH_TOKEN`
 is already set in your environment, read its "In a Managed Agents sandbox"
-section first: the push command below differs there.
+section first: `git push` does not work there and the `github` MCP tools
+replace it.
 
 ```sh
 gh auth status                       # needs the `workflow` scope — see below
