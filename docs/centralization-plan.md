@@ -11,27 +11,16 @@ Written for whichever machine picks this up next (Claude memory does not
 travel between machines; this section does). Everything below is verified
 fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–2 are complete.
 
-**Next, on the Mac — repoint the desktop app.** The Windows rig's app was
-switched in cut-over step (c); the Mac's still holds the Railway URL,
-which is now dead (project deleted), so the app shows "not connected"
-errors until this is done.
-
-1. `git pull` — the Mac checkout is at `9c1b39b`; the Windows session
-   added six commits (steps (c)–(d), Phase 2, Phase 6, this note).
-2. The app's config is `~/Library/Application Support/com.ironfleet.app/control-plane.json`
-   (`{"url": ..., "token": ...}`). Change only `url` to
-   `https://fleet.opustower.dev`; the token is already the right one —
-   the droplet's `CONTROL_PLANE_TOKEN` is unchanged from Railway's. Either
-   the gear icon in the running app (URL + paste the same token) or edit
-   the file with the app closed; the form writes that exact file.
-3. Launch (`target/release` bundle, or `cd app && npm run tauri dev` with
-   no `CONTROL_PLANE_*` env vars set — env vars would override the file).
-   The badge top-right should read `https://fleet.opustower.dev`; the
-   Fleet tab shows four agents with `jarvis` at v5; the Usage tab's recent
-   activity includes `sesn_01MQMjRaHFhwvhefFsfpVemh` (5¢, jarvis) — the
-   Phase 2 verification session, which only ever existed on the droplet.
-4. Strike this block, commit, push. Then Phase 3 or Phase 6 — see "Next"
-   further down.
+**Mac app repointed** — done 2026-09-15 ~05:25 UTC on the Mac. `url` in
+`~/Library/Application Support/com.ironfleet.app/control-plane.json`
+changed to `https://fleet.opustower.dev`, token untouched (the Railway
+copy sits beside it as `control-plane.json.railway.bak`; delete when
+convenient). The installed `/Applications/J.A.R.V.I.S..app` relaunched:
+badge reads `https://fleet.opustower.dev`, Fleet tab shows four agents
+with `jarvis` at v5 and the droplet's sessions; `GET /usage` with the
+app's token returns the droplet rollups with
+`sesn_01MQMjRaHFhwvhefFsfpVemh` (jarvis, 5¢) in `recent`. Both desktop
+clients now point at the droplet; nothing references Railway.
 
 **Live on the droplet** (`/opt/iron-fleet/deploy/droplet`, compose project
 `droplet`, images from GHCR, both public):
@@ -71,19 +60,14 @@ The cut-over list from `deploy/droplet/README.md`, all done:
   `9c1b39b`. Fleet tab: four agents (jarvis v5), sessions list. Usage tab:
   by-agent spend plus recent activity including step (b)'s
   `sesn_01MANKa4WeWib5ECPymUS9Bs` row — i.e. the droplet's rollups, not
-  Railway's. The Mac still points at Railway until someone opens its
-  connection form (gear icon) and pastes the droplet URL; the token is
-  unchanged.
+  Railway's. Mac repointed 2026-09-15 ~05:25 UTC (see top of this
+  section).
 - (d) ~~Disable the Railway webhook endpoint; remove the Railway
   deployments~~ — done 2026-09-15 ~04:50 UTC, see above. Verified after:
   `sesn_01MQMjRaHFhwvhefFsfpVemh` (jarvis, 5¢) started through the droplet,
   its `session.status_idled` landed on the droplet at 04:54:53 UTC and
   wrote the usage row — with Railway serving nothing, the only place it
   could go.
-
-**Still open, not infrastructure:** the Mac app points at the dead Railway
-URL until its gear-icon form is set to `https://fleet.opustower.dev` (same
-token). Thirty seconds, first thing on the Mac.
 
 **Phase 2 done 2026-09-15 ~05:15 UTC**, a week ahead of the planned soak
 by the user's call: repo cleanup in `68f7ad2`, then `railway delete` of
