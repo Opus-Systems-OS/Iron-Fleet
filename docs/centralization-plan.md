@@ -1,6 +1,6 @@
 # Centralizing on the droplet — plan
 
-**Status:** plan, nothing executed. Rewritten 2026-09-14 from (a) the
+**Status:** Phase 0 complete (2026-09-14); Phase 1 not started. Rewritten 2026-09-14 from (a) the
 2026-09-13 draft that lived here and (b) an "Opus Tower OS / Opus API"
 proposal drafted outside this repo without knowledge of what was already
 built. Section "What the outside proposal got wrong" records the
@@ -27,7 +27,8 @@ DigitalOcean nyc1, 1 vCPU / 961 MB, Ubuntu 24.04, `198.199.66.109`, named
 "Opus Tower OS." Recon done 2026-09-14 — see `docs/droplet-inventory.md`.
 Short version: a blank box. Root SSH on 22, nothing else listening, no
 Docker, no MQTT broker (the outside proposal's claim was wrong), no swap,
-firewall inactive. Domain unconfirmed.
+firewall inactive. Domain: `opustower.dev` (Cloudflare DNS, records
+DNS-only so Caddy does its own ACME).
 
 ## Decision this plan makes
 
@@ -87,14 +88,16 @@ Hard boundaries: a phase does not start until the one above it is verified.
 Read-only on the droplet; one edit to this repo.
 
 - ~~SSH in. Inventory.~~ Done 2026-09-14 → `docs/droplet-inventory.md`.
-- Confirm or obtain a domain. Bare-IP HTTPS is the wrong path for both the
-  Anthropic webhook endpoint and the MCP server URL. Suggested:
-  `fleet.<domain>` → control-plane, `mcp.<domain>` → mcp-fleet.
-- Update `CLAUDE.md` "Open decisions": Railway → droplet, why, what stays
-  on Railway (nothing, once cut over), droplet's role. Commit.
+- ~~Confirm or obtain a domain.~~ Done 2026-09-14: `opustower.dev`.
+  `fleet.opustower.dev` and `mcp.opustower.dev` each have an A record to
+  `198.199.66.109` and an AAAA to `2604:a880:400:d1:0:4:f807:7001`,
+  Cloudflare proxy **off** (grey cloud) so Caddy can complete HTTP-01 and
+  hold the certificates itself. Bare-IP HTTPS was never an option for the
+  Anthropic webhook endpoint or the MCP server URL.
+- ~~Update `CLAUDE.md` "Open decisions".~~ Done 2026-09-14.
 
-**Exit:** ~~inventory written~~ (done), domain resolving to the droplet,
-`CLAUDE.md` updated.
+**Exit:** ~~inventory written~~, ~~domain resolving to the droplet~~,
+~~`CLAUDE.md` updated~~ — all done 2026-09-14.
 
 ### Phase 1 — Rehost control-plane and mcp-fleet
 
@@ -133,11 +136,11 @@ Run **alongside** Railway, not instead of it:
 Cut over in this order, each step confirmed before the next:
 
 4. Set `MCP_FLEET_URL` on the droplet's control-plane to
-   `https://mcp.<domain>/mcp`. `mcp_fleet::ensure_vault` rotates the vault
+   `https://mcp.opustower.dev/mcp`. `mcp_fleet::ensure_vault` rotates the vault
    credential for the new URL on boot (already built — see
    `control-plane/README.md`). Start a `jarvis` session and confirm a
    `list_agents` tool call round-trips.
-5. Register `https://fleet.<domain>/webhooks/managed-agents` in Console →
+5. Register `https://fleet.opustower.dev/webhooks/managed-agents` in Console →
    Webhooks (`session.status_idled`, `session.budget_reached`). Put the
    new `whsec_` in the droplet's `.env`. Run a session to idle and confirm
    the delivery lands on the droplet.

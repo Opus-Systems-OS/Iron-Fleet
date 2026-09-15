@@ -117,10 +117,18 @@ Do not start a stage before the one above it works end to end.
 
 ## Open decisions
 
-- **Control plane host: Railway** (decided 2026-09-13). `control-plane/Dockerfile`
-  builds from the repo root; `.railway/railway.ts` declares the service, the
-  `/data` volume for SQLite, and the secret names. Secrets are set with
-  `railway variables set`, never in a file.
+- **Control plane host: the `opustower.dev` droplet** (decided 2026-09-14,
+  reversing the 2026-09-13 Railway decision; plan and phases in
+  `docs/centralization-plan.md`, box inventory in `docs/droplet-inventory.md`).
+  DigitalOcean nyc1, `198.199.66.109` / `2604:a880:400:d1:0:4:f807:7001`.
+  `fleet.opustower.dev` → `control-plane`, `mcp.opustower.dev` → `mcp-fleet`,
+  both behind Caddy-terminated TLS; deploy config lives in `deploy/droplet/`.
+  The droplet hosts the two binaries we already have and nothing else — no
+  session store, no agents, no second control plane. Railway keeps running
+  alongside until the Phase 1 cut-over is verified, then is decommissioned in
+  Phase 2; until then `.railway/railway.ts` + `railway up --detach` remain the
+  Railway deploy path. Droplet secrets live in `.env` on the box (`chmod 600`),
+  never in this repo.
 - Multi-agent orchestration, memory stores, and outcomes are beta on the
   Managed Agents side. Keep the control plane able to fall back to direct
   Messages API calls for anything where beta instability would actually hurt.

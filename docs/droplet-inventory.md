@@ -27,7 +27,7 @@ nothing to coexist with — Phase 1 starts from a clean box.
   Mac and ship images. 961 MB with no swap will OOM a Rust release build.
 - `ufw`: enable with 22/80/443 before exposing anything. No 1883 rule —
   there is no MQTT to expose.
-- Domain: **unconfirmed.** Nothing on the box hints at one. Needed before
-  Caddy can issue certificates.
+- Domain: `opustower.dev` (confirmed 2026-09-14, Cloudflare DNS).
+  `fleet.` and `mcp.` subdomains point at the box, proxy off.
 - Mosquitto is dropped from the target diagram until something actually
   needs it.
