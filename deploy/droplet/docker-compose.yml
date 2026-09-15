@@ -42,6 +42,9 @@ services:
       PORT: "8090"
       # Compose DNS; no reason to leave the box for the control plane.
       CONTROL_PLANE_URL: http://control-plane:8080
+      # rmcp's DNS-rebinding guard 403s any Host it doesn't know; Caddy
+      # forwards the public one unchanged.
+      ALLOWED_HOSTS: mcp.opustower.dev
     depends_on:
       - control-plane
 

@@ -53,7 +53,9 @@ async fn run() -> Result<()> {
         StreamableHttpService::new(
             move || Ok(FleetServer::new(client.clone())),
             Default::default(),
-            StreamableHttpServerConfig::default().with_cancellation_token(cancel.child_token()),
+            StreamableHttpServerConfig::default()
+                .with_allowed_hosts(cfg.allowed_hosts)
+                .with_cancellation_token(cancel.child_token()),
         );
 
     let mcp_fleet_token = Arc::new(cfg.mcp_fleet_token);
