@@ -1,14 +1,18 @@
 # Centralizing on the droplet — plan
 
-**Status (2026-09-14, late):** Phase 0 done. Phase 1 deployed and mid
-cut-over — see "Resume here" just below. Phase 2+ not started. Phase 6
+**Status (2026-09-15, ~05:00 UTC):** Phases 0 and 1 done — the droplet is
+the only control plane; Railway is stopped but not deleted. Phase 2
+(delete Railway) waits for the soak period, earliest 2026-09-22. Phase 6
 (local inference on the rig) added 2026-09-15, decisions still open.
 
 ## Resume here
 
 Written for whichever machine picks this up next (the Mac session that did
 the work ends here; its Claude memory does not travel). Everything below
-is verified fact as of 2026-09-15 ~04:40 UTC, not plan.
+is verified fact as of 2026-09-15 ~05:00 UTC, not plan.
+
+**Phase 1 is complete.** Every step below is struck; what's left is
+(1) the Mac app's connection form and (2) Phase 2 after the soak.
 
 **Live on the droplet** (`/opt/iron-fleet/deploy/droplet`, compose project
 `droplet`, images from GHCR, both public):
@@ -28,8 +32,11 @@ is verified fact as of 2026-09-15 ~04:40 UTC, not plan.
 - Bug found and fixed on the way (PR #4, `26d8b35`): rmcp 3.3 rejected every
   non-localhost `Host` with 403; `mcp-fleet` now takes `ALLOWED_HOSTS`.
 
-**Railway is still running.** Both webhook endpoints (Railway's and the
-droplet's) are registered and enabled; Anthropic delivers to both.
+**Railway is stopped, not deleted** (2026-09-15 ~04:50 UTC, from the
+Windows rig): `railway down` on `Iron-Fleet` and `mcp-fleet` — both
+Railway URLs now 404; services, `iron-fleet-volume` (41 MB, `/data`) and
+variables kept, so rollback is `railway up --detach`. The Railway webhook
+endpoint is **disabled** in the Console; only the droplet's is enabled.
 
 - (a) ~~Jarvis MCP round-trip~~ — done, `sesn_01EW9VRp6iPHackSvJWwTWJE`.
 - (b) ~~Droplet webhook endpoint~~ — done 2026-09-15 04:35 UTC. Endpoint
@@ -37,7 +44,7 @@ droplet's) are registered and enabled; Anthropic delivers to both.
   Anthropic's real `session.status_idled` for `sesn_01MANKa4WeWib5ECPymUS9Bs`
   arrived from 160.79.106.132 → 204, signature verified, usage row written.
 
-**Next, in order** (the cut-over list in `deploy/droplet/README.md`):
+The cut-over list from `deploy/droplet/README.md`, all done:
 
 - (c) ~~Desktop app → `https://fleet.opustower.dev`~~ — done 2026-09-15
   ~04:45 UTC from the Windows rig. Same token, only the URL in
@@ -48,10 +55,19 @@ droplet's) are registered and enabled; Anthropic delivers to both.
   Railway's. The Mac still points at Railway until someone opens its
   connection form (gear icon) and pastes the droplet URL; the token is
   unchanged.
-- (d) Console: **disable** (not delete) the Railway webhook endpoint.
-  Railway dashboard: remove the active deployment of `Iron-Fleet` and
-  `mcp-fleet` (keep services, volume, variables — rollback is a redeploy).
-- Then mark Phase 1 complete here and strike the steps.
+- (d) ~~Disable the Railway webhook endpoint; remove the Railway
+  deployments~~ — done 2026-09-15 ~04:50 UTC, see above. Verified after:
+  `sesn_01MQMjRaHFhwvhefFsfpVemh` (jarvis, 5¢) started through the droplet,
+  its `session.status_idled` landed on the droplet at 04:54:53 UTC and
+  wrote the usage row — with Railway serving nothing, the only place it
+  could go.
+
+**Still open, not infrastructure:** the Mac app points at the dead Railway
+URL until its gear-icon form is set to `https://fleet.opustower.dev` (same
+token). Thirty seconds, first thing on the Mac.
+
+**Next:** Phase 2, after the soak — earliest 2026-09-22. Phase 6's
+decisions (link, models, GPU sharing) can be made any time.
 
 **A new machine needs:**
 
@@ -77,8 +93,8 @@ Stages 1–5 of `CLAUDE.md`'s build order are complete and live:
 
 | Thing | Where | State |
 |---|---|---|
-| `control-plane` | Railway, `practical-compassion` / `Iron-Fleet` | Live. Registry, `POST /sessions`, session proxy routes, `/events`, `/interrupt`, `/usage`, signed webhooks. SQLite on a `/data` volume. |
-| `mcp-fleet` | Railway, same project, service `mcp-fleet` | Live. The five jarvis tools, nothing else. |
+| `control-plane` | Droplet, `fleet.opustower.dev` (Railway stopped 2026-09-15) | Live. Registry, `POST /sessions`, session proxy routes, `/events`, `/interrupt`, `/usage`, signed webhooks. SQLite on a `/data` volume. |
+| `mcp-fleet` | Droplet, `mcp.opustower.dev` (Railway stopped 2026-09-15) | Live. The five jarvis tools, nothing else. |
 | `worker/` | The RTX 5070 rig, not the droplet | `rig-gpu` self-hosted environment. Out of scope here. |
 | `app/` | Desktop (Tauri 2) | Fleet tab + Usage tab + session controls. **No voice loop yet.** |
 | `agents/` | Committed JSON | Four agents, two environments, synced on boot. |
@@ -224,11 +240,13 @@ Cut over in this order, each step confirmed before the next:
    the delivery lands on the droplet.
 6. ~~Point the desktop app at the new URL/token (in-app connection form).~~
    Done 2026-09-15 (Windows); Mac pending, see "Resume here".
-7. Disable — don't delete — the Railway webhook endpoint and stop the
-   Railway services. Rollback path stays for a week or two.
+7. ~~Disable — don't delete — the Railway webhook endpoint and stop the
+   Railway services.~~ Done 2026-09-15. Rollback path stays for a week
+   or two.
 
-**Exit:** all traffic (app, Anthropic webhooks, jarvis MCP callbacks) hits
-the droplet; Railway stopped.
+**Exit:** ~~all traffic (app, Anthropic webhooks, jarvis MCP callbacks) hits
+the droplet; Railway stopped.~~ Met 2026-09-15 ~05:00 UTC (Mac app
+repoint pending, see "Resume here").
 
 ### Phase 2 — Decommission Railway
 

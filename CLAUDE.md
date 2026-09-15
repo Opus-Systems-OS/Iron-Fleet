@@ -125,10 +125,10 @@ Do not start a stage before the one above it works end to end.
   `fleet.opustower.dev` → `control-plane`, `mcp.opustower.dev` → `mcp-fleet`,
   both behind Caddy-terminated TLS; deploy config lives in `deploy/droplet/`.
   The droplet hosts the two binaries we already have and nothing else — no
-  session store, no agents, no second control plane. Railway keeps running
-  alongside until the Phase 1 cut-over is verified, then is decommissioned in
-  Phase 2; until then `.railway/railway.ts` + `railway up --detach` remain the
-  Railway deploy path. Droplet secrets live in `.env` on the box (`chmod 600`),
+  session store, no agents, no second control plane. Phase 1 cut-over
+  verified 2026-09-15: Railway is stopped (deployments removed, webhook
+  disabled) but kept as a rollback path — `.railway/railway.ts` +
+  `railway up --detach` — until Phase 2 deletes it after the soak. Droplet secrets live in `.env` on the box (`chmod 600`),
   never in this repo.
 - Multi-agent orchestration, memory stores, and outcomes are beta on the
   Managed Agents side. Keep the control plane able to fall back to direct
