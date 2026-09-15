@@ -1,7 +1,8 @@
 # Centralizing on the droplet — plan
 
 **Status (2026-09-14, late):** Phase 0 done. Phase 1 deployed and mid
-cut-over — see "Resume here" just below. Phase 2+ not started.
+cut-over — see "Resume here" just below. Phase 2+ not started. Phase 6
+(local inference on the rig) added 2026-09-15, decisions still open.
 
 ## Resume here
 
@@ -146,6 +147,7 @@ From `CLAUDE.md`, restated because the outside proposal violated each one:
 ## Phases
 
 Hard boundaries: a phase does not start until the one above it is verified.
+One exception: Phase 6 depends on Phase 2 only and may run beside 3–5.
 
 ### Phase 0 — Recon and record
 
@@ -294,6 +296,102 @@ What "history and audit" means under constraint 1:
 
 **Exit:** a restore from backup has been tested once.
 
+### Phase 6 — Local inference on the rig (Ollama)
+
+Added 2026-09-15 at the user's request. Depends on Phase 2 only — it needs
+one control-plane URL to wire against and nothing from Phases 3–5 — so it
+may run beside them. Numbered 6 because it's the newest, not the last.
+
+**What it is.** Ollama on the Windows rig, on the RTX 5070, as a local
+inference backend the fleet reaches two ways:
+
+1. **From `rig-gpu` sessions, directly.** The worker runs tool calls as
+   shell commands on the rig (`worker/README.md`, `exec.rs`), so a
+   `gpu-compute` session can call Ollama's HTTP API as soon as it's
+   running. Nothing to build beyond telling the agent it's there. The
+   agent loop stays on Anthropic; the local model's output is a tool
+   result, like any other CUDA job.
+2. **Through `control-plane`** — "the Opus API" in the outside proposal's
+   words — so the desktop app and anything else holding a bearer token can
+   use it without knowing where the rig is. New routes, bearer-authed like
+   every other route, proxied to the rig over a private link:
+   `POST /inference/chat`, `POST /inference/embeddings`,
+   `GET /inference/models`. Rig off → `503` with a clear body. No queue,
+   no fallback to Claude.
+
+**What it is not** (constraints 2, 4 and 5, restated for this phase):
+
+- Not an agent loop. No fleet agent runs on a local model. `jarvis`,
+  `blueweb-*` and `gpu-compute` stay Claude-model Managed Agents; the
+  `model` fields in `agents/` don't change. Local models answer single
+  requests — a chat completion, an embedding — and that is the whole
+  surface.
+- No failover in either direction. Claude unavailable ≠ use Ollama; rig
+  off ≠ use Claude. `503` is the answer.
+- Not exposed to `jarvis` through `mcp-fleet`. Jarvis dispatches work; if
+  a job needs a local model it starts a `gpu-compute` session, which has it.
+- Not on the droplet. 1 vCPU / 961 MB runs no model. The "network" is one
+  node — the rig — until a second GPU exists; a static `INFERENCE_URL` on
+  control-plane, not a node registry, until then.
+- Not reachable from the internet. Ollama binds `127.0.0.1` on the rig;
+  only the droplet reaches it, over the private link.
+
+**Decide first** (record in `CLAUDE.md` "Open decisions", as Phase 0 did):
+
+- **Private link, droplet → rig.** The rig sits behind home NAT and today
+  makes only outbound connections (the worker polls). Keep that posture.
+  Recommended: Tailscale on both boxes — control-plane proxies to
+  `http://<rig tailnet IP>:11434`, nothing opened at home. Alternative with
+  no new dependency: a reverse SSH tunnel from the rig to the droplet
+  (`ssh -R 11434:127.0.0.1:11434`), at the cost of keeping a tunnel
+  service alive on Windows. Not a router port-forward.
+- **Models.** Undecided; sizing beats naming. 12 GB of VRAM, shared with
+  whatever a `rig-gpu` session is running. Start with one general model
+  and one embedding model, ≤ ~8 GB resident at Q4 so a session job still
+  fits beside it — candidates in that class: `qwen3:8b`, `llama3.1:8b`,
+  `gemma3:12b`; `qwen2.5-coder:7b` if code is the use; `nomic-embed-text`
+  for embeddings. Check the installed Ollama build supports Blackwell
+  (CUDA ≥ 12.8) before blaming a model. Record the chosen tags in
+  `deploy/rig/models.txt` so the rig is reproducible the way `agents/` is.
+- **GPU sharing.** Ollama and `rig-gpu` session jobs contend for the same
+  12 GB. Start with `OLLAMA_MAX_LOADED_MODELS=1` and a short
+  `OLLAMA_KEEP_ALIVE` so an idle model unloads; revisit only if a real
+  session OOMs.
+- **What the desktop app does with it.** In this phase, only a models list
+  and a "rig online / offline" indicator on the Fleet tab. A chat UI on
+  local models is a separate ask, and a voice loop on a local model is not
+  Jarvis (constraint 4).
+
+**Build** (once decided), in `deploy/rig/` beside `deploy/droplet/`:
+
+1. Ollama on the rig as a Windows service: `OLLAMA_HOST=127.0.0.1`, the
+   env vars above, models pulled from `models.txt`. Runbook in
+   `deploy/rig/README.md`, same shape as the droplet's.
+2. The private link. `curl http://<rig>:11434/api/tags` from the droplet
+   is the check.
+3. `control-plane`: `INFERENCE_URL` env var — unset means every
+   `/inference/*` route is `404`, so a deployment without a rig is
+   unchanged. The three routes above; streaming passthrough for chat; a
+   request-body size limit; timeouts sized for a cold model load (the
+   first request after idle can take tens of seconds). Proxy Ollama's
+   native API, not its OpenAI-compat layer — one shape to maintain.
+4. `agents/gpu-compute.json`: extend `system` with where Ollama is and
+   which models are pulled. The address depends on where the worker runs
+   tools — `127.0.0.1` on the host, `host.docker.internal` from the CUDA
+   container (`worker/README.md` says "Linux", so confirm on the first
+   run). Roll the agent version through boot sync as usual.
+5. Desktop app: `GET /inference/models` → Fleet tab shows the rig's
+   models or "rig offline".
+6. Usage: local inference has no list-price cost, so no `session_usage`
+   rows. If counts are wanted later, a small `inference_requests` rollup —
+   not a prompt/response log; constraint 1 applies to local models too.
+
+**Exit:** from the Mac, `POST /inference/chat` via `fleet.opustower.dev`
+returns a completion generated on the 5070; a `gpu-compute` session calls
+the local model in a tool step and its Claude-side cost still shows in
+Usage; with the rig off, the same `/inference/chat` returns `503` and
+nothing else in the fleet changes.
+
 ## Explicitly not in this plan
 
 - A new API service (FastAPI/Express), a Postgres database, or any
@@ -305,10 +403,13 @@ What "history and audit" means under constraint 1:
   `DELETE /agents/{id}` have no counterpart on purpose.
 - "Local agents" on the droplet. There are none. `rig-gpu` is the 5070 rig.
 - A standalone voice app. The voice loop is a view in `app/`.
-- Local ↔ cloud failover.
+- Local ↔ cloud failover — including Claude ↔ Ollama, once Phase 6 exists.
+- Fleet agents running on local models. Phase 6 adds local *inference*,
+  not local agents.
 - mTLS between services. Bearer tokens over Caddy-terminated TLS is the
   current model and sufficient for two services on one box.
-- `worker/` and `rig-gpu`. Unchanged.
+- `worker/` and `rig-gpu`. Unchanged through Phase 5; Phase 6 adds Ollama
+  beside the worker on the rig and one line to `gpu-compute`'s prompt.
 - MQTT/IoT. There is no broker on the box. If one is ever wanted it's a
   separate service that nothing in Iron-Fleet talks to.
 - BlueWeb customer sites. Separate concern, separate hosting.
@@ -334,6 +435,7 @@ Recorded so the next reader doesn't relitigate it:
 
 ```
 deploy/droplet/     compose, Caddyfile, .env.example, deploy.sh
+deploy/rig/         (Phase 6) Ollama service setup, models.txt, runbook
 docs/               this plan, droplet-inventory.md
 ```
 
