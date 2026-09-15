@@ -7,12 +7,31 @@ added 2026-09-15, decisions still open.
 
 ## Resume here
 
-Written for whichever machine picks this up next (the Mac session that did
-the work ends here; its Claude memory does not travel). Everything below
-is verified fact as of 2026-09-15 ~05:00 UTC, not plan.
+Written for whichever machine picks this up next (Claude memory does not
+travel between machines; this section does). Everything below is verified
+fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–2 are complete.
 
-**Phase 1 is complete.** Every step below is struck; what's left is
-(1) the Mac app's connection form and (2) Phase 2 after the soak.
+**Next, on the Mac — repoint the desktop app.** The Windows rig's app was
+switched in cut-over step (c); the Mac's still holds the Railway URL,
+which is now dead (project deleted), so the app shows "not connected"
+errors until this is done.
+
+1. `git pull` — the Mac checkout is at `9c1b39b`; the Windows session
+   added six commits (steps (c)–(d), Phase 2, Phase 6, this note).
+2. The app's config is `~/Library/Application Support/com.ironfleet.app/control-plane.json`
+   (`{"url": ..., "token": ...}`). Change only `url` to
+   `https://fleet.opustower.dev`; the token is already the right one —
+   the droplet's `CONTROL_PLANE_TOKEN` is unchanged from Railway's. Either
+   the gear icon in the running app (URL + paste the same token) or edit
+   the file with the app closed; the form writes that exact file.
+3. Launch (`target/release` bundle, or `cd app && npm run tauri dev` with
+   no `CONTROL_PLANE_*` env vars set — env vars would override the file).
+   The badge top-right should read `https://fleet.opustower.dev`; the
+   Fleet tab shows four agents with `jarvis` at v5; the Usage tab's recent
+   activity includes `sesn_01MQMjRaHFhwvhefFsfpVemh` (5¢, jarvis) — the
+   Phase 2 verification session, which only ever existed on the droplet.
+4. Strike this block, commit, push. Then Phase 3 or Phase 6 — see "Next"
+   further down.
 
 **Live on the droplet** (`/opt/iron-fleet/deploy/droplet`, compose project
 `droplet`, images from GHCR, both public):
