@@ -7,7 +7,7 @@ cut-over — see "Resume here" just below. Phase 2+ not started.
 
 Written for whichever machine picks this up next (the Mac session that did
 the work ends here; its Claude memory does not travel). Everything below
-is verified fact as of 2026-09-14 ~04:20 UTC, not plan.
+is verified fact as of 2026-09-15 ~04:40 UTC, not plan.
 
 **Live on the droplet** (`/opt/iron-fleet/deploy/droplet`, compose project
 `droplet`, images from GHCR, both public):
@@ -27,19 +27,17 @@ is verified fact as of 2026-09-14 ~04:20 UTC, not plan.
 - Bug found and fixed on the way (PR #4, `26d8b35`): rmcp 3.3 rejected every
   non-localhost `Host` with 403; `mcp-fleet` now takes `ALLOWED_HOSTS`.
 
-**Railway is still running** and is still the registered webhook endpoint.
-Anthropic's real deliveries go there, not to the droplet, until step (b).
+**Railway is still running.** Both webhook endpoints (Railway's and the
+droplet's) are registered and enabled; Anthropic delivers to both.
+
+- (a) ~~Jarvis MCP round-trip~~ — done, `sesn_01EW9VRp6iPHackSvJWwTWJE`.
+- (b) ~~Droplet webhook endpoint~~ — done 2026-09-15 04:35 UTC. Endpoint
+  registered, new `whsec_` in the droplet `.env`, control-plane restarted;
+  Anthropic's real `session.status_idled` for `sesn_01MANKa4WeWib5ECPymUS9Bs`
+  arrived from 160.79.106.132 → 204, signature verified, usage row written.
 
 **Next, in order** (the cut-over list in `deploy/droplet/README.md`):
 
-- (b) **Console → Manage → Webhooks → Add endpoint**
-  `https://fleet.opustower.dev/webhooks/managed-agents`, events
-  `session.status_idled` + `session.budget_reached`. Put the new `whsec_`
-  into the droplet's `.env` (`ANTHROPIC_WEBHOOK_SIGNING_KEY`), then
-  `docker compose up -d control-plane`. Run any jarvis session to idle and
-  confirm `session idled` appears in `docker compose logs control-plane`
-  on the droplet and the row shows in `GET /usage`. Keep Railway's endpoint
-  enabled until (d).
 - (c) Desktop app → in-app connection form → `https://fleet.opustower.dev`,
   same `CONTROL_PLANE_TOKEN`. Fleet + Usage tabs render.
 - (d) Console: **disable** (not delete) the Railway webhook endpoint.
