@@ -44,7 +44,8 @@ agents=$(sqlite3 "$TMP/control-plane.db" 'SELECT count(*) FROM agents;')
 # --- secrets and TLS state -----------------------------------------------
 cp "$HERE/.env" "$TMP/env"
 cp "$HERE/backup.env" "$TMP/backup.env"
-tar -C "$CADDY_DATA" -cf "$TMP/caddy_data.tar" .
+# The volume also holds Caddy's access logs (MBs, rolling) — only certs/ACME state is worth keeping.
+tar -C "$CADDY_DATA" --exclude='access-*.log' -cf "$TMP/caddy_data.tar" .
 printf 'stamp=%s\nagents=%s\ndb_bytes=%s\n' "$STAMP" "$agents" "$(stat -c %s "$TMP/control-plane.db")" > "$TMP/MANIFEST"
 
 # --- encrypt + upload ----------------------------------------------------
