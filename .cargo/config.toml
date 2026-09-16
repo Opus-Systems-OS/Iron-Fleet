@@ -1,0 +1,5 @@
+# `target.nosync`, not `target`: a checkout under ~/Documents on a Mac is
+# iCloud Drive, and iCloud syncs (and, under disk pressure, evicts) build
+# artifacts unless the folder name ends in `.nosync`. Harmless elsewhere.
+[build]
+target-dir = "target.nosync"
