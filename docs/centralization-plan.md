@@ -75,6 +75,27 @@ the whole `practical-compassion` project (it held only the two services
 and the volume). No rollback path to Railway exists now; the droplet's
 `control-plane.db` was a superset of the Railway one, so nothing was lost.
 
+**Phase 4 done 2026-09-16 ~04:00 UTC** (PR #7 `ab6263a`, app-only — no
+droplet change). Third tab "Jarvis": hold the orb (or Space), talk,
+release; the first utterance is `POST /sessions` for `jarvis`, later ones
+`POST /sessions/{id}/events`; the reply comes back on the Phase 3 feed
+(second watch slot `"voice"`) and is spoken by the webview's
+`speechSynthesis`. Speech input is native macOS (`SFSpeechRecognizer` +
+`AVAudioEngine` tap via objc2, one owning thread, `app/src-tauri/src/speech/`),
+with `Info.plist` usage strings; other platforms get the text box only.
+Exit test: `sesn_013qfALTWMA9L54uURbtKWRf` ("Hey Jarvis", 5¢) started from
+the orb on the Mac, answer heard, row in Usage.
+
+Gotcha found on the way: on the Mac the repo sat under `~/Documents`,
+which is iCloud Drive with "Optimize Mac Storage" on a disk down to 5 GB
+free — iCloud evicted build fingerprints, `node_modules`, `.git` objects
+and freshly edited source files, and every read of an evicted file blocked
+(cargo "hangs"; a release build that takes 8 min took 30+). The Mac
+checkout moved to `~/code/Iron-Fleet` (a fresh clone; the old tree is
+disposable) and builds go to `target.nosync/` (`.cargo/config.toml`;
+iCloud skips `.nosync`). **Free disk space on the Mac before the next
+big build** — the pressure is what triggers eviction.
+
 **Phase 3 done 2026-09-16 ~00:12 UTC** (PR #5 `f2442f9`, deployed via
 `deploy.sh`; panel placement follow-up PR #6). control-plane gained
 `GET /sessions/{id}/events` (history) and `GET /sessions/{id}/stream` (SSE
@@ -100,9 +121,11 @@ filter that returns 403 for `opustower.dev` ("Unrated"). It is not the
 droplet — check for the FortiGuard block page before debugging Caddy.
 The Mac must be on another network (hotspot) to use the app.
 
-**Next after that:** Phase 6's decisions (link, models, GPU sharing).
+**Next:** Phase 5 (usage/audit/ops) or Phase 6's decisions (link, models,
+GPU sharing); independent.
 
-**A new machine needs:**
+**A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
+never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
 
 1. Its own SSH key on the droplet. Only the Mac's `id_ed25519` is in
    `root@198.199.66.109:~/.ssh/authorized_keys`. Generate one
@@ -354,7 +377,7 @@ The stage `app/README.md` calls "Not yet." Builds on Phase 3.
   already works through `mcp-fleet`; nothing new on that side.
 
 **Exit:** speak to the Mac, hear a `jarvis` session answer, see its cost
-in Usage.
+in Usage. **Met 2026-09-16** — see "Resume here".
 
 ### Phase 5 — Usage, audit, and ops
 
