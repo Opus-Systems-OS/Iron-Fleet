@@ -91,8 +91,9 @@ rollup audit trail; deployed via `deploy.sh`, boot sync unchanged
   1.60.1 — that rclone needs `--s3-no-head` against R2 (PR #10) or it logs
   a false `NotImplemented` and retries.
 - **Keys:** age identity on the Mac at `~/.config/iron-fleet/backup.key`
-  (0600; recipient `age1dqjde94au3zs3xl98hlleskl424mh3qzry3zq2qkes0qvg26hgmsssjkq7`).
-  Not on the droplet, not in the repo. The Mac has no R2 token yet —
+  (0600; recipient `age1dqjde94au3zs3xl98hlleskl424mh3qzry3zq2qkes0qvg26hgmsssjkq7`),
+  with a fallback copy in the user's **iCloud Keychain** (added
+  2026-09-16). Not on the droplet, not in the repo. The Mac has no R2 token yet —
   `restore.sh latest` there needs one in `./backup.env` or the environment
   (`deploy/droplet/README.md` "Restore"); until then fetch the object on
   the droplet and `restore.sh <file>`.
