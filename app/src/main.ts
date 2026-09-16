@@ -356,6 +356,7 @@ async function selectSession(id: string) {
   sessionCost.textContent = "";
   setStreamState("connecting");
   sessionPanel.hidden = false;
+  sessionPanel.scrollIntoView({ block: "nearest", behavior: "smooth" });
   for (const row of sessionsBody.querySelectorAll<HTMLTableRowElement>("tr[data-id]")) {
     row.classList.toggle("selected", row.dataset.id === id);
   }
