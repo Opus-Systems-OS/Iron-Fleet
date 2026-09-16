@@ -75,20 +75,30 @@ the whole `practical-compassion` project (it held only the two services
 and the volume). No rollback path to Railway exists now; the droplet's
 `control-plane.db` was a superset of the Railway one, so nothing was lost.
 
-**Phase 3 in progress** (branch `phase-3-session-streaming`, 2026-09-15):
-control-plane gained `GET /sessions/{id}/events` (history) and
-`GET /sessions/{id}/stream` (SSE proxy, byte-for-byte), and `interrupt`
-now sends a `user.interrupt` event — the `/v1/sessions/{id}/interrupt`
-path it used to POST to does not exist. The app's Fleet tab got a
-selected-session transcript fed by a Rust watcher (`app/src-tauri/src/stream.rs`)
-that does the docs' open-stream → list-history → dedupe-on-id dance.
-Verified live from the droplet 2026-09-15 ~18:52 UTC against
-`sesn_01MQMjRaHFhwvhefFsfpVemh`: `GET …/events/stream` → 200
-`text/event-stream`, first frame a `: connected` comment, no `?beta=true`
-needed; `POST …/events [{"type":"user.interrupt"}]` → 200
-`{"data":[{"id":"sevt_01HbQAp29b1FD9cCdBj1dYtA","type":"user.interrupt"}]}`.
-Remaining: merge, `deploy.sh`, then the exit test (a jarvis session
-watched live in the app) — see Phase 3 below.
+**Phase 3 done 2026-09-16 ~00:12 UTC** (PR #5 `f2442f9`, deployed via
+`deploy.sh`; panel placement follow-up PR #6). control-plane gained
+`GET /sessions/{id}/events` (history) and `GET /sessions/{id}/stream` (SSE
+proxy, byte-for-byte), and `interrupt` now sends a `user.interrupt`
+event — the `/v1/sessions/{id}/interrupt` path it used to POST to does
+not exist, so Interrupt in the app and mcp-fleet's `interrupt_session`
+had been 404ing. The app's Fleet tab got a selected-session transcript
+fed by a Rust watcher (`app/src-tauri/src/stream.rs`) that does the
+docs' open-stream → list-history → dedupe-on-id dance.
+
+Exit test on `sesn_01822Qk8zFZQf36NrRb5fDbE` (jarvis, started from the
+Mac app, $0.11 of $0.50): the transcript panel showed the turns live;
+with the stream open through Caddy, a follow-up posted at 00:03:44 UTC
+produced `running → user.message → agent.message → session.usage →
+status_idle` frames by 00:03:46; an interrupt posted 3s into a
+"count to 2000" turn showed `user.interrupt → thread_status_idle →
+session.usage → status_idle (end_turn)` one second later with no
+`agent.message`. Stream wire format seen live: a `: connected` comment
+first, then `event: message` + `data: {event}` frames.
+
+Gotcha found on the way: the Mac's usual network runs a FortiGuard web
+filter that returns 403 for `opustower.dev` ("Unrated"). It is not the
+droplet — check for the FortiGuard block page before debugging Caddy.
+The Mac must be on another network (hotspot) to use the app.
 
 **Next after that:** Phase 6's decisions (link, models, GPU sharing).
 
@@ -326,7 +336,8 @@ session-operations), then live from the droplet:
 - The docs' curl examples append `?beta=true` to every URL; it is not
   required (SDKs don't send it; verified live without it).
 
-**Exit:** app shows a session's agent messages appearing live.
+**Exit:** app shows a session's agent messages appearing live. **Met
+2026-09-16** — see "Resume here".
 
 ### Phase 4 — Jarvis voice view
 
