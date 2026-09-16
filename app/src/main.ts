@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Transcript } from "./transcript";
+import type { SessionBudget, SessionEventPayload, SessionUsage, StreamStatePayload } from "./transcript";
+import { VoiceView } from "./voice";
 
 // Fleet Dashboard + Usage tab (build order stage 4: session controls, then
 // the Usage tab). Every value on screen is re-fetched from the control plane
@@ -26,20 +29,6 @@ interface Agent {
   synced_at: string;
 }
 
-interface MoneyAmount {
-  amount: string;
-  currency: string;
-}
-
-interface SessionUsage {
-  list_cost?: MoneyAmount;
-  active_seconds?: number;
-}
-
-interface SessionBudget {
-  max_list_cost?: MoneyAmount;
-}
-
 interface Session {
   id: string;
   status: string;
@@ -54,39 +43,6 @@ interface Session {
 
 interface SessionListEnvelope {
   data: Session[];
-}
-
-/** One Anthropic session event, as the API sent it. Only the fields we render are typed. */
-interface SessionEvent {
-  type: string;
-  id?: string;
-  content?: ContentBlock[];
-  name?: string;
-  input?: unknown;
-  stop_reason?: { type: string };
-  error?: { message?: string };
-  usage?: SessionUsage;
-  budget?: SessionBudget;
-  // event_start / event_delta previews
-  event?: { type: string; id: string };
-  event_id?: string;
-  delta?: { type: string; index: number; content?: ContentBlock };
-}
-
-interface ContentBlock {
-  type: string;
-  text?: string;
-}
-
-interface SessionEventPayload {
-  session_id: string;
-  event: SessionEvent;
-}
-
-interface StreamStatePayload {
-  session_id: string;
-  state: "open" | "reconnecting" | "closed" | "error";
-  message?: string;
 }
 
 interface AgentUsage {
@@ -131,6 +87,7 @@ const sessionsBody = el<HTMLTableSectionElement>("sessions-body");
 const tabs = el<HTMLElement>("tabs");
 const tabFleet = el<HTMLElement>("tab-fleet");
 const tabUsage = el<HTMLElement>("tab-usage");
+const tabJarvis = el<HTMLElement>("tab-jarvis");
 const newSessionForm = el<HTMLFormElement>("new-session-form");
 const newSessionAgent = el<HTMLSelectElement>("new-session-agent");
 const newSessionTask = el<HTMLInputElement>("new-session-task");
@@ -147,10 +104,10 @@ const sessionMessage = el<HTMLButtonElement>("session-message");
 const sessionInterrupt = el<HTMLButtonElement>("session-interrupt");
 const sessionConsole = el<HTMLButtonElement>("session-console");
 const sessionClose = el<HTMLButtonElement>("session-close");
-const transcript = el<HTMLDivElement>("transcript");
+const transcript = new Transcript(el<HTMLDivElement>("transcript"));
 
 let pollTimer: ReturnType<typeof setInterval> | undefined;
-let activeTab: "fleet" | "usage" = "fleet";
+let activeTab: "fleet" | "usage" | "jarvis" = "fleet";
 let selectedSessionId: string | null = null;
 let selectedConsoleUrl: string | null = null;
 
@@ -231,12 +188,14 @@ function escapeHtml(value: string): string {
 tabs.addEventListener("click", (e) => {
   const button = (e.target as HTMLElement).closest<HTMLButtonElement>(".tab-button");
   if (!button) return;
-  const tab = button.dataset.tab === "usage" ? "usage" : "fleet";
+  const tab = button.dataset.tab === "usage" ? "usage" : button.dataset.tab === "jarvis" ? "jarvis" : "fleet";
   activeTab = tab;
   for (const b of tabs.querySelectorAll(".tab-button")) b.classList.toggle("active", b === button);
   tabFleet.hidden = tab !== "fleet";
   tabUsage.hidden = tab !== "usage";
-  void refresh();
+  tabJarvis.hidden = tab !== "jarvis";
+  if (tab === "jarvis") voice.mounted();
+  else void refresh();
 });
 
 // ---- fleet tab ----------------------------------------------------------
@@ -349,7 +308,7 @@ async function selectSession(id: string) {
   if (id === selectedSessionId) return;
   selectedSessionId = id;
   selectedConsoleUrl = null;
-  transcript.innerHTML = "";
+  transcript.clear();
   sessionTitle.textContent = id;
   sessionStatus.textContent = "—";
   sessionStatus.className = "badge badge-unknown";
@@ -360,16 +319,16 @@ async function selectSession(id: string) {
   for (const row of sessionsBody.querySelectorAll<HTMLTableRowElement>("tr[data-id]")) {
     row.classList.toggle("selected", row.dataset.id === id);
   }
-  await invoke("watch_session", { id });
+  await invoke("watch_session", { id, slot: "fleet" });
 }
 
 async function deselectSession() {
   selectedSessionId = null;
   selectedConsoleUrl = null;
   sessionPanel.hidden = true;
-  transcript.innerHTML = "";
+  transcript.clear();
   for (const row of sessionsBody.querySelectorAll("tr.selected")) row.classList.remove("selected");
-  await invoke("unwatch_session");
+  await invoke("unwatch_session", { slot: "fleet" });
 }
 
 function renderSessionHead(s: Session) {
@@ -398,105 +357,22 @@ function setStreamState(state: string, message?: string) {
   streamState.className = `stream-pill stream-${state === "open" ? "open" : state === "error" ? "error" : state === "reconnecting" ? "reconnecting" : "idle"}`;
 }
 
-function textOf(content: ContentBlock[] | undefined): string {
-  return (content ?? [])
-    .filter((b) => b.type === "text" && typeof b.text === "string")
-    .map((b) => b.text as string)
-    .join("");
-}
-
-function truncate(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max)}…` : value;
-}
-
-function appendEntry(className: string, text: string, id?: string): HTMLDivElement {
-  const div = document.createElement("div");
-  div.className = `entry ${className}`;
-  div.textContent = text;
-  if (id) div.dataset.eventId = id;
-  transcript.appendChild(div);
-  return div;
-}
-
-function appendToolEntry(summary: string, detail: string) {
-  const details = document.createElement("details");
-  details.className = "entry entry-tool";
-  const s = document.createElement("summary");
-  s.textContent = summary;
-  details.appendChild(s);
-  if (detail) {
-    const pre = document.createElement("div");
-    pre.textContent = truncate(detail, 2000);
-    details.appendChild(pre);
-  }
-  transcript.appendChild(details);
-}
-
-/** Streams a token preview into a placeholder bubble; the persisted event replaces it. */
-function pendingBubble(eventId: string): HTMLDivElement {
-  const existing = transcript.querySelector<HTMLDivElement>(`.entry.pending[data-event-id="${CSS.escape(eventId)}"]`);
-  return existing ?? appendEntry("entry-agent pending", "", eventId);
-}
-
-function renderEvent(ev: SessionEvent) {
-  const atBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
-  switch (ev.type) {
-    case "user.message":
-      appendEntry("entry-user", textOf(ev.content), ev.id);
-      break;
-    case "user.interrupt":
-      appendEntry("entry-system", "interrupt sent", ev.id);
-      break;
-    case "agent.message": {
-      const pending = ev.id ? transcript.querySelector(`.entry.pending[data-event-id="${CSS.escape(ev.id)}"]`) : null;
-      if (pending) pending.remove();
-      appendEntry("entry-agent", textOf(ev.content), ev.id);
-      break;
-    }
-    case "event_start":
-      if (ev.event?.type === "agent.message" && ev.event.id) pendingBubble(ev.event.id);
-      break;
-    case "event_delta":
-      if (ev.event_id && ev.delta?.content?.type === "text" && ev.delta.content.text) {
-        pendingBubble(ev.event_id).textContent += ev.delta.content.text;
-      }
-      break;
-    case "agent.tool_use":
-    case "agent.mcp_tool_use":
-    case "agent.custom_tool_use": {
-      const input = ev.input === undefined ? "" : JSON.stringify(ev.input, null, 1);
-      appendToolEntry(`⚙ ${ev.name ?? ev.type} ${truncate(input.replace(/\s+/g, " "), 120)}`, input);
-      break;
-    }
-    case "agent.tool_result":
-      appendToolEntry(`↳ result ${truncate(textOf(ev.content).replace(/\s+/g, " "), 120)}`, textOf(ev.content));
-      break;
-    case "session.status_running":
+function renderEvent(ev: SessionEventPayload["event"]) {
+  const r = transcript.render(ev);
+  switch (r.kind) {
+    case "running":
       setSessionStatus("running");
-      appendEntry("entry-system", "running", ev.id);
       break;
-    case "session.status_idle": {
-      const reason = ev.stop_reason?.type ?? "idle";
-      setSessionStatus(reason === "budget_reached" ? "budget_reached" : "idle");
-      appendEntry(`entry-system${reason === "budget_reached" ? " alert" : ""}`, `idle (${reason})`, ev.id);
+    case "idle":
+      setSessionStatus(r.stop_reason === "budget_reached" ? "budget_reached" : "idle");
       break;
-    }
-    case "session.status_error":
-    case "session.error":
+    case "error":
       setSessionStatus("failed");
-      appendEntry("entry-system alert", `error: ${ev.error?.message ?? ev.type}`, ev.id);
       break;
-    case "session.usage":
-      setSessionCost(ev.usage, ev.budget);
+    case "usage":
+      setSessionCost(r.usage, r.budget);
       break;
-    case "agent.thinking":
-    case "span.model_request_start":
-    case "span.model_request_end":
-      break; // noise for this view
-    default:
-      appendEntry("entry-system", ev.type, ev.id);
   }
-  if (atBottom) transcript.scrollTop = transcript.scrollHeight;
 }
 
 sessionClose.addEventListener("click", () => void deselectSession());
@@ -573,6 +449,7 @@ function renderUsage(usage: UsageResponse) {
 
 async function refresh() {
   try {
+    if (activeTab === "jarvis") return;
     if (activeTab === "fleet") {
       const [agents, sessions] = await Promise.all([
         invoke<Agent[]>("list_agents"),
@@ -604,15 +481,20 @@ function startPolling() {
   pollTimer = setInterval(refresh, POLL_MS);
 }
 
+const voice = new VoiceView(showError);
+
 async function init() {
   await listen<SessionEventPayload>("session-event", ({ payload }) => {
+    voice.onSessionEvent(payload);
     if (payload.session_id !== selectedSessionId) return; // a stale watcher's last words
     renderEvent(payload.event);
   });
   await listen<StreamStatePayload>("session-stream-state", ({ payload }) => {
+    voice.onStreamState(payload);
     if (payload.session_id !== selectedSessionId) return;
     setStreamState(payload.state, payload.message);
   });
+  await voice.init();
 
   const status = await checkConnection();
   if (status.configured) startPolling();

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Both strings are mandatory: without them macOS terminates the process
+	     the first time the Jarvis view touches the microphone or the speech
+	     recognizer. tauri-build embeds this file in dev binaries and merges it
+	     into the bundle's Info.plist for release. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>J.A.R.V.I.S. listens while you hold the orb so you can talk to the fleet.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>J.A.R.V.I.S. transcribes what you say to the orb into a request for the jarvis agent.</string>
+</dict>
+</plist>

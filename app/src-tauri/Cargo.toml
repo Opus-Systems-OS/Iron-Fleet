@@ -29,3 +29,12 @@ futures-util = "0.3"
 
 # [profile.release] lives in the workspace root Cargo.toml — Cargo ignores a
 # member crate's own profile tables and warns.
+
+# macOS speech I/O (CLAUDE.md: platform-gated in src-tauri). Windows builds
+# never see these; `speech/mod.rs` compiles the text-only stub there.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-avf-audio = "0.3"
+objc2-speech = { version = "0.3", features = ["objc2-avf-audio"] }
+block2 = "0.6"
