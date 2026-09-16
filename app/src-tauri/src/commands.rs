@@ -148,6 +148,67 @@ pub async fn get_usage(state: State<'_, AppState>) -> Result<serde_json::Value, 
     get_json(&state.http, &cfg, "/usage").await
 }
 
+/// The Fleet tab's one-line rig status (Phase 6). Three outcomes, decided
+/// on the HTTP status so the frontend never parses an error string:
+/// `404` — this deployment has no `INFERENCE_URL`, show nothing;
+/// `503` — configured but the rig (or the tailnet) is down;
+/// `200` — Ollama's `/api/tags`, reduced to model names.
+#[derive(Debug, Serialize)]
+pub struct RigStatus {
+    configured: bool,
+    online: bool,
+    models: Vec<String>,
+    reason: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_inference_models(state: State<'_, AppState>) -> Result<RigStatus, String> {
+    let cfg = require_config(&state)?;
+    let url = format!("{}/inference/models", cfg.url);
+    let resp = state
+        .http
+        .get(&url)
+        .bearer_auth(&cfg.token)
+        .send()
+        .await
+        .map_err(|e| format!("could not reach {}: {e}", cfg.url))?;
+    let status = resp.status();
+    match status.as_u16() {
+        404 => Ok(RigStatus {
+            configured: false,
+            online: false,
+            models: Vec::new(),
+            reason: None,
+        }),
+        503 => {
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+            Ok(RigStatus {
+                configured: true,
+                online: false,
+                models: Vec::new(),
+                reason: body["error"]["message"].as_str().map(str::to_owned),
+            })
+        }
+        _ => {
+            let body = read_response(resp).await?;
+            let models = body["models"]
+                .as_array()
+                .map(|ms| {
+                    ms.iter()
+                        .filter_map(|m| m["name"].as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(RigStatus {
+                configured: true,
+                online: true,
+                models,
+                reason: None,
+            })
+        }
+    }
+}
+
 /// Start streaming `id`'s events to the webview as `session-event` /
 /// `session-stream-state` Tauri events, replacing whatever `slot` was
 /// watching before. Two slots exist: `"fleet"` follows the selected row on

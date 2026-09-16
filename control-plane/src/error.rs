@@ -40,6 +40,13 @@ pub enum Error {
     },
     #[error("anthropic transport: {0}")]
     UpstreamTransport(#[from] reqwest::Error),
+
+    // Phase 6: the rig's Ollama over the tailnet. There is deliberately no
+    // fallback — a rig that is off answers 503 and nothing retries elsewhere.
+    #[error("rig offline: {0}")]
+    RigOffline(String),
+    #[error("inference {status}: {message}")]
+    Inference { status: u16, message: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -59,6 +66,8 @@ impl Error {
             Error::Db(_) => "database",
             Error::Upstream { .. } => "upstream",
             Error::UpstreamTransport(_) => "upstream_transport",
+            Error::RigOffline(_) => "rig_offline",
+            Error::Inference { .. } => "inference",
         }
     }
 
@@ -77,6 +86,14 @@ impl Error {
                 _ => StatusCode::BAD_GATEWAY,
             },
             Error::UpstreamTransport(_) => StatusCode::BAD_GATEWAY,
+            Error::RigOffline(_) => StatusCode::SERVICE_UNAVAILABLE,
+            // Ollama's own 4xx (unknown model, bad body) is the caller's
+            // problem and passes through as-is; anything else is a gateway
+            // failure on our side of the link.
+            Error::Inference { status, .. } => StatusCode::from_u16(*status)
+                .ok()
+                .filter(StatusCode::is_client_error)
+                .unwrap_or(StatusCode::BAD_GATEWAY),
         }
     }
 
@@ -112,6 +129,12 @@ impl IntoResponse for Error {
             if let Some(id) = request_id {
                 body["error"]["request_id"] = json!(id);
             }
+        }
+        if let Error::Inference {
+            status: upstream, ..
+        } = &self
+        {
+            body["error"]["upstream_status"] = json!(upstream);
         }
 
         let mut resp = (status, Json(body)).into_response();
@@ -158,5 +181,23 @@ mod tests {
         assert_eq!(up(429).status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(up(400).status(), StatusCode::BAD_GATEWAY);
         assert_eq!(up(500).status(), StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn inference_errors_map_to_503_passthrough_or_502() {
+        assert_eq!(
+            Error::RigOffline("x".into()).status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(Error::RigOffline("x".into()).kind(), "rig_offline");
+        let inf = |status| Error::Inference {
+            status,
+            message: "m".into(),
+        };
+        assert_eq!(inf(404).status(), StatusCode::NOT_FOUND);
+        assert_eq!(inf(400).status(), StatusCode::BAD_REQUEST);
+        assert_eq!(inf(500).status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(inf(999).status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(inf(404).kind(), "inference");
     }
 }

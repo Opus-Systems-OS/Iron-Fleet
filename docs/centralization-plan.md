@@ -1,9 +1,9 @@
 # Centralizing on the droplet — plan
 
-**Status (2026-09-15, ~05:15 UTC):** Phases 0–2 done — the droplet is the
-only deployment; the Railway project is deleted and the repo has no Railway
-config left. Phases 3–5 not started. Phase 6 (local inference on the rig)
-added 2026-09-15, decisions still open.
+**Status (2026-09-16):** Phases 0–5 done — the droplet is the only
+deployment; the Railway project is deleted and the repo has no Railway
+config left. Phase 6 (local inference on the rig) in progress: code and
+runbooks on branch `phase-6-inference`, rig set up; droplet side pending.
 
 ## Resume here
 
@@ -155,8 +155,103 @@ filter that returns 403 for `opustower.dev` ("Unrated"). It is not the
 droplet — check for the FortiGuard block page before debugging Caddy.
 The Mac must be on another network (hotspot) to use the app.
 
-**Next:** Phase 6's decisions (link, models, GPU sharing). Phases 0–5
-are done; nothing on the droplet is pending.
+**Phase 6 started 2026-09-16 ~05:15 UTC — decisions made, nothing built.**
+The four "decide first" items are settled (Tailscale link; `qwen3:8b` +
+`nomic-embed-text`; `OLLAMA_MAX_LOADED_MODELS=1`/`KEEP_ALIVE=5m`; app gets
+only a rig online/offline line) and recorded in `CLAUDE.md` "Open
+decisions". The approved implementation plan is **`docs/phase-6-plan.md`**
+— execute it from there, in its "Order of work". Rig facts as of the
+start: Ollama installed (version unchecked), no Tailscale, the worker has
+never run live — so the exit clause "a `gpu-compute` session calls the
+local model in a tool step" is explicitly left open until Stage 2's first
+live run; everything else in the phase is in scope.
+
+Work moved from the Mac to the rig at the user's request. Mac-side
+leftovers that don't block: the Mac has `age`/`rclone` installed and the
+age identity at `~/.config/iron-fleet/backup.key`; the Mac has no R2 token.
+
+**Phase 6 build done on the rig 2026-09-16** (branch `phase-6-inference`,
+plan steps 1 and 3 of `docs/phase-6-plan.md` "Order of work"):
+
+- **Part A** (control-plane): `INFERENCE_URL` → `src/inference.rs`
+  (Ollama native API client, 5 s connect / 180 s read / no total timeout),
+  `src/http/inference.rs` (`GET /inference/models`, `POST /inference/chat`
+  streaming NDJSON or buffered on `"stream": false`, `POST
+  /inference/embeddings`; 1 MiB body cap), registered **only** when the URL
+  is set. `Error::RigOffline` → `503 rig_offline`, `Error::Inference` →
+  Ollama's 4xx passthrough / 5xx → 502. 7 new tests (closed port →
+  `RigOffline`; an axum stub for tags / two-frame chat stream / embed /
+  `model 'x' not found`), 60 total green.
+- **Part B** (`deploy/rig/`): `README.md`, `models.txt`, `setup.ps1`,
+  `check.ps1`. Scripts are pure ASCII on purpose — Windows PowerShell 5.1
+  reads BOM-less UTF-8 as ANSI and an em dash's trailing byte closes a
+  string. Native exes go through an `Invoke-Native` helper because 5.1
+  turns redirected stderr into a terminating error under `'Stop'`.
+- **Part C** (`deploy/droplet/`): `bootstrap.sh` Tailscale section (apt
+  repo, `tailscale up --hostname=opustower`, login URL printed, blocks up
+  to 10 min), `env.example` `INFERENCE_URL` (commented), README "Rig link".
+- **Part D**: `agents/gpu-compute.json` `system` names Ollama's address
+  and the two models (boot sync will roll `gpu-compute` to its next
+  version on deploy); app `get_inference_models` command maps 404 / 503 /
+  200 to `{configured, online, models, reason}`; Fleet tab `#rig-status`
+  line above the agents table, polled outside `refresh()`'s `Promise.all`.
+  `tsc` and `cargo check -p app` clean (the one warning, `PARTIAL_EVENT`,
+  predates this).
+
+**Rig, verified live 2026-09-16 (this box, Windows 11, hostname `opus`):**
+Ollama **0.34.0** (Blackwell-capable), Tailscale **1.102.4** logged in as
+`Opus1247@` (GitHub identity), tailnet IPv4 **`100.79.233.8`**, so
+`INFERENCE_URL=http://100.79.233.8:11434`. `setup.ps1` set the three
+`OLLAMA_*` user env vars (all were unset), restarted the tray app (back
+on `127.0.0.1:11434` in seconds), and pulled the models — see the
+`check.ps1` output recorded below. Ollama autostarts from
+`Ollama.lnk` in the user's Startup folder, not a service. The rig's
+`~/.ssh/id_ed25519.pub` is **not** on the droplet yet — step 4 needs it
+added from the Mac or the DO console before this box can run
+`bootstrap.sh` / `deploy.sh`.
+
+Rig evidence, 2026-09-16 (`setup.ps1` then a first prompt, then
+`check.ps1`):
+
+- `ollama pull`: `qwen3:8b` 5.2 GB (`500a1f067a9f`), `nomic-embed-text`
+  274 MB (`0a109f422b47`), ~12 min at ~7–11 MB/s.
+- `tailscale serve status`: `tcp://100.79.233.8:11434` (and
+  `opus.taile70900.ts.net`, IPv6) `--> tcp://127.0.0.1:11434`, tailnet
+  only. `GET http://100.79.233.8:11434/api/tags` from the rig itself
+  returns both tags.
+- First `/api/chat` on `qwen3:8b` (`think: false`, `stream: false`):
+  "Hello! How can I assist you today?" — 48.1 s total of which 22.2 s
+  model load; `ollama ps` at that moment `5.6 GB 100% GPU`, `nvidia-smi`
+  6918 / 12227 MiB.
+- `/api/embed` on `nomic-embed-text` → a 768-float vector. Right after,
+  `ollama ps` showed **only** `nomic-embed-text` (323 MB, 100% GPU) —
+  `OLLAMA_MAX_LOADED_MODELS=1` evicted the chat model as intended;
+  `nvidia-smi` back to 1904 MiB.
+- User env: `OLLAMA_HOST=127.0.0.1:11434`, `OLLAMA_KEEP_ALIVE=5m`,
+  `OLLAMA_MAX_LOADED_MODELS=1`.
+
+**Next, in order** (plan steps 2, 4, 5):
+
+1. Merge `phase-6-inference`; `deploy.sh` on the droplet with no
+   `INFERENCE_URL` yet → `GET /inference/models` must be `404`, `/agents`
+   unchanged, boot sync rolls `gpu-compute` one version.
+2. On the droplet: `bootstrap.sh` (installs Tailscale, prints the login
+   URL — click it as `Opus1247`), then `tailscale status` lists `opus`;
+   `docker run --rm --network droplet_default curlimages/curl -s
+   http://100.79.233.8:11434/api/tags` returns the two tags. Set
+   `INFERENCE_URL=http://100.79.233.8:11434` in `.env`, `deploy.sh`.
+3. Exit checks 1 and 3 from `docs/phase-6-plan.md`; Mac rebuild for the
+   Fleet tab line; docs PR with the evidence; delete `docs/phase-6-plan.md`.
+
+**Open, by design:** exit clause 2 (a `gpu-compute` session calling
+Ollama in a tool step) waits on the worker's first live run. One thing to
+confirm then: the agent prompt says `host.docker.internal:11434` from a
+container, but Ollama is bound to `127.0.0.1` — on Docker Desktop for
+Windows that address arrives on a non-loopback interface, so the worker
+may need the container to use the tailnet IP or Ollama to bind wider.
+Not changed now; it's the worker weekend's problem, not this phase's.
+
+**Next:** step 1 above.
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
@@ -527,6 +622,13 @@ returns a completion generated on the 5070; a `gpu-compute` session calls
 the local model in a tool step and its Claude-side cost still shows in
 Usage; with the rig off, the same `/inference/chat` returns `503` and
 nothing else in the fleet changes.
+
+**Met (2026-09-16, partial):** build steps 1 (as the tray app at logon,
+not a service — see `deploy/rig/README.md` "Ollama at login"), 3, 4 and 5
+are built and tested on branch `phase-6-inference`; the rig side of step 2
+is live (`tailscale serve --tcp=11434`). Step 6 (usage counts) is
+deliberately not built. Exit clauses 1 and 3 await the droplet side; exit
+clause 2 awaits the worker's first live run. Progress in "Resume here".
 
 ## Explicitly not in this plan
 

@@ -2,12 +2,14 @@
 
 pub mod agents;
 pub mod health;
+pub mod inference;
 pub mod sessions;
 pub mod usage;
 
 use crate::anthropic::Client;
 use crate::db::Db;
 use crate::error::Error;
+use crate::inference::Inference;
 use crate::webhook::{self, signature::SigningKey, SeenEvents};
 use axum::extract::{Request, State};
 use axum::middleware::{self, Next};
@@ -30,11 +32,14 @@ pub struct AppState {
     /// attached to every session's `vault_ids` so an agent whose own
     /// `mcp_servers` references that URL authenticates automatically.
     pub mcp_fleet_vault_id: Arc<Option<String>>,
+    /// `Some` when `INFERENCE_URL` is set: the rig's Ollama over the tailnet
+    /// (Phase 6). `None` means the `/inference/*` routes don't exist.
+    pub inference: Arc<Option<Inference>>,
 }
 
 pub fn router(state: AppState) -> Router {
     // Bearer-protected: anything that can spend money or read fleet state.
-    let protected = Router::new()
+    let mut protected = Router::new()
         .route("/agents", get(agents::list))
         .route("/sessions", post(sessions::create).get(sessions::list))
         .route("/sessions/{id}", get(sessions::get))
@@ -45,11 +50,14 @@ pub fn router(state: AppState) -> Router {
         .route("/sessions/{id}/stream", get(sessions::stream))
         .route("/sessions/{id}/interrupt", post(sessions::interrupt))
         .route("/usage", get(usage::get))
-        .route("/usage/export.csv", get(usage::export_csv))
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            require_bearer,
-        ));
+        .route("/usage/export.csv", get(usage::export_csv));
+    if state.inference.is_some() {
+        protected = protected.merge(inference::router());
+    }
+    let protected = protected.route_layer(middleware::from_fn_with_state(
+        state.clone(),
+        require_bearer,
+    ));
 
     // Public: Anthropic can't send our bearer token; the webhook is HMAC-verified instead.
     let public = Router::new()

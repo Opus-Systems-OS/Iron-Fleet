@@ -1,0 +1,10 @@
+# Models Ollama keeps pulled on the rig (Phase 6). One tag per line; `#`
+# starts a comment. setup.ps1 pulls whatever is missing from `ollama list`.
+# Adding a tag here is the only sanctioned way to put a model on the rig —
+# the gpu-compute agent is told not to pull its own.
+
+# Chat. ~5 GB Q4; fits the 5070's 12 GB with room for a session's CUDA work.
+qwen3:8b
+
+# Embeddings, 768 dims. ~270 MB.
+nomic-embed-text

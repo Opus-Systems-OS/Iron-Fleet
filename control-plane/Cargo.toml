@@ -29,3 +29,7 @@ subtle = "2"
 hex = "0.4"
 time = { version = "0.3", features = ["formatting", "parsing"] }
 http = "1"
+
+[dev-dependencies]
+# inference.rs tests drain a streamed chat body.
+futures-util = "0.3"

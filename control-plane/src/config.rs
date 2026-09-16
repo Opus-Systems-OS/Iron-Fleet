@@ -22,6 +22,10 @@ pub struct Config {
     /// unauthenticated (or isn't wired up at all) until these are set.
     pub mcp_fleet_url: Option<String>,
     pub mcp_fleet_token: Option<String>,
+    /// Phase 6: the rig's Ollama, reached over the tailnet. Unset means the
+    /// `/inference/*` routes are not registered at all — a deployment
+    /// without a rig is byte-for-byte the same service as before.
+    pub inference_url: Option<String>,
 }
 
 impl Config {
@@ -95,6 +99,7 @@ impl Config {
             sync_on_boot,
             mcp_fleet_url: optional("MCP_FLEET_URL"),
             mcp_fleet_token: optional("MCP_FLEET_TOKEN"),
+            inference_url: optional("INFERENCE_URL").map(|u| u.trim_end_matches('/').to_owned()),
         })
     }
 }

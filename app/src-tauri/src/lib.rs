@@ -68,6 +68,7 @@ pub fn run() {
             commands::send_session_event,
             commands::interrupt_session,
             commands::get_usage,
+            commands::get_inference_models,
             commands::watch_session,
             commands::unwatch_session,
             speech::speech_support,

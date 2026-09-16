@@ -24,11 +24,22 @@ All routes except `/healthz` and `/webhooks/*` require
 | `POST /sessions/{id}/interrupt` | Stops a session's in-flight work without ending it. Sends a `user.interrupt` event on `/v1/sessions/{id}/events` — the Managed Agents API has no interrupt route; the interrupted turn ends with an ordinary `session.status_idle` (`stop_reason: end_turn`). |
 | `GET /usage?since=&until=` | `{window: {since, until}, by_agent: [{agent_slug, session_count, total_list_cost_cents, budget_reached_count}], recent: [...session_usage rows, newest first, max 100]}`. Built entirely from the local `session_usage` rollup — no Anthropic call, so it's only as fresh as the last webhook delivery. `since`/`until` are optional, RFC 3339 or a bare `YYYY-MM-DD` (midnight UTC), and window `observed_at` as `[since, until)`; the echoed `window` is the normalised UTC form. `400 invalid_request` on an unparseable bound or `since >= until`. |
 | `GET /usage/export.csv?since=&until=` | The audit trail: every `session_usage` row in the same window, **oldest first**, as `text/csv` with a `Content-Disposition` filename. Columns are the table's: `session_id,agent_slug,environment_slug,list_cost_cents,input_tokens,output_tokens,active_seconds,budget_reached,last_event_type,observed_at`; nulls are empty, `budget_reached` is `0`/`1`. Rollups only — a session's transcript is behind its `console_url`, never here. |
+| `GET /inference/models` | The rig's pulled models: Ollama's `/api/tags` JSON unchanged. **Only registered when `INFERENCE_URL` is set** — without it, all three `/inference/*` routes are a plain `404`. Rig off or tailnet down → `503 rig_offline` (with `Retry-After: 5`); that is the whole failover story, nothing retries against Claude. |
+| `POST /inference/chat` | `{model, messages, ...}` → Ollama's `/api/chat` on the rig, body passed through (`stream`, `options`, `keep_alive`, `format`, `tools`). Streams `application/x-ndjson` frames as Ollama emits them; with `"stream": false` returns the single JSON object. `400 invalid_request` on a missing/empty `model` or a non-array `messages`; Ollama's own `4xx` (`model 'x' not found`) passes through with the same status as `inference`, its `5xx` → `502`. Bodies over 1 MiB are rejected. |
+| `POST /inference/embeddings` | `{model, input, ...}` → Ollama's `/api/embed`, buffered. Same validation (`input` is a string or array) and error mapping. |
 | `POST /webhooks/managed-agents` | Anthropic → us. Verifies the Standard Webhooks HMAC, dedupes on event id, handles `session.status_idled` (INFO log) and `session.budget_reached` (WARN log), records a usage rollup. |
 
 Errors are always `{"error": {"type": "...", "message": "..."}}`. Upstream
 Anthropic errors come back as `502` (or `404`/`503` where that is what they
 mean) with `upstream_status` and `request_id` for the support ticket.
+
+A local completion, end to end (the rig must be on and on the tailnet):
+
+```sh
+curl -sS -H "Authorization: Bearer $CONTROL_PLANE_TOKEN" -H 'content-type: application/json'   https://fleet.opustower.dev/inference/chat   -d '{"model":"qwen3:8b","stream":false,"messages":[{"role":"user","content":"one word: hello"}]}'
+# → {"model":"qwen3:8b","message":{"role":"assistant","content":"..."},"done":true,...}
+# rig off → 503 {"error":{"type":"rig_offline","message":"100.x.y.z:11434: ..."}}
+```
 
 ## Configuration (environment only)
 
@@ -41,6 +52,7 @@ mean) with `upstream_status` and `request_id` for the support ticket.
 | `MCP_FLEET_TOKEN` | no | Independent of the URL. When also set, provisions (once) a vault + `static_bearer` credential authenticating `mcp-fleet` and attaches it to every session's `vault_ids`. Without it, `mcp-fleet` connections are attempted unauthenticated. See `mcp-fleet/README.md`. |
 | `BLUEWEB_GITHUB_TOKEN` | yes* | Classic GitHub PAT (`repo`, `workflow`, `read:org`) for `blueweb-client`: becomes the sandbox's `GH_TOKEN` and the token that clones its repository mounts. *Required only because `agents/blueweb-client.json` names it — sync fails loud if a referenced `from_env` is unset. |
 | `BLUEWEB_CLOUDFLARE_API_TOKEN` | yes* | Cloudflare API token (Pages: Read) for `blueweb-client`: the sandbox's `CLOUDFLARE_API_TOKEN`. Same rule. |
+| `INFERENCE_URL` | no | The rig's Ollama over the tailnet, e.g. `http://100.79.233.8:11434` (Phase 6). Unset — the default — means the `/inference/*` routes are not registered at all. Never a public address: the rig binds Ollama to `127.0.0.1` and `tailscale serve` publishes it to the tailnet only. |
 | `PORT` | no | Default `8080`. |
 | `DATABASE_PATH` | no | Default `./control-plane.db`; `/data/control-plane.db` on the droplet. |
 | `AGENTS_DIR` | no | Default `./agents`; `/app/agents` in the image. |
