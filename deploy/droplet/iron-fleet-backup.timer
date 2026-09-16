@@ -1,0 +1,15 @@
+# Installed and enabled by bootstrap.sh:
+#   systemctl list-timers iron-fleet-backup.timer   # next / last run
+#   journalctl -u iron-fleet-backup                 # each run's one-line result
+[Unit]
+Description=Iron-Fleet nightly backup (07:00 UTC)
+
+[Timer]
+OnCalendar=*-*-* 07:00:00 UTC
+# Catch up if the box was off at 07:00; spread so it never lands exactly
+# on the hour with unattended-upgrades.
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

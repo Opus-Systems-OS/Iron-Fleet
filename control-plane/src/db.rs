@@ -124,6 +124,16 @@ pub struct UsageRow {
     pub observed_at: String,
 }
 
+/// Half-open `[since, until)` window over `session_usage.observed_at`.
+/// Bounds are RFC 3339 UTC strings in the exact form `now()` writes, so
+/// plain text comparison is a correct time comparison; the HTTP layer
+/// normalises user input before it gets here. `None` = unbounded.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct UsageWindow {
+    pub since: Option<String>,
+    pub until: Option<String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AgentUsageRow {
     pub agent_slug: String,
@@ -486,33 +496,47 @@ impl Db {
         })
     }
 
-    /// Most recently observed rollups first — what the Usage tab's session
-    /// list shows.
-    pub fn usage_rows(&self, limit: u32) -> Result<Vec<UsageRow>> {
+    /// Rollups observed inside `window`. `Newest` (most recently observed
+    /// first, with `limit`) is what the Usage tab's session list shows;
+    /// `Oldest` (no limit) is the CSV export's audit order.
+    pub fn usage_rows(
+        &self,
+        window: &UsageWindow,
+        order: UsageOrder,
+        limit: Option<u32>,
+    ) -> Result<Vec<UsageRow>> {
+        let order_by = match order {
+            UsageOrder::Newest => "observed_at DESC, rowid DESC",
+            UsageOrder::Oldest => "observed_at ASC, rowid ASC",
+        };
+        // SQLite treats a negative LIMIT as "no limit".
+        let limit = limit.map(i64::from).unwrap_or(-1);
         self.with(|c| {
-            let mut stmt = c.prepare(
+            let mut stmt = c.prepare(&format!(
                 "SELECT session_id, agent_slug, environment_slug, list_cost_cents, input_tokens,
                         output_tokens, active_seconds, budget_reached, last_event_type, observed_at
-                 FROM session_usage ORDER BY observed_at DESC, rowid DESC LIMIT ?1",
-            )?;
-            let rows = stmt.query_map([limit], read_usage_row)?;
+                 FROM session_usage {USAGE_WINDOW} ORDER BY {order_by} LIMIT ?3"
+            ))?;
+            let rows =
+                stmt.query_map(params![window.since, window.until, limit], read_usage_row)?;
             rows.collect()
         })
     }
 
-    /// Totals per agent, for the Usage tab's summary. `total_list_cost_cents`
-    /// sums whatever's been observed so far — sessions never reported by a
-    /// webhook yet (still running, or the webhook hasn't landed) aren't
-    /// counted until they are, same as the rest of this table.
-    pub fn usage_by_agent(&self) -> Result<Vec<AgentUsageRow>> {
+    /// Totals per agent inside `window`, for the Usage tab's summary.
+    /// `total_list_cost_cents` sums whatever's been observed so far —
+    /// sessions never reported by a webhook yet (still running, or the
+    /// webhook hasn't landed) aren't counted until they are, same as the
+    /// rest of this table.
+    pub fn usage_by_agent(&self, window: &UsageWindow) -> Result<Vec<AgentUsageRow>> {
         self.with(|c| {
-            let mut stmt = c.prepare(
+            let mut stmt = c.prepare(&format!(
                 "SELECT agent_slug, COUNT(*),
                         COALESCE(SUM(CAST(list_cost_cents AS INTEGER)), 0),
                         SUM(budget_reached)
-                 FROM session_usage GROUP BY agent_slug ORDER BY agent_slug",
-            )?;
-            let rows = stmt.query_map([], |r| {
+                 FROM session_usage {USAGE_WINDOW} GROUP BY agent_slug ORDER BY agent_slug"
+            ))?;
+            let rows = stmt.query_map(params![window.since, window.until], |r| {
                 Ok(AgentUsageRow {
                     agent_slug: r.get(0)?,
                     session_count: r.get::<_, i64>(1)? as u64,
@@ -564,6 +588,17 @@ impl Db {
             Ok(())
         })
     }
+}
+
+/// The `[since, until)` filter both usage reads share; `?1` = since,
+/// `?2` = until, either NULL for unbounded.
+const USAGE_WINDOW: &str = "WHERE (?1 IS NULL OR observed_at >= ?1)
+                              AND (?2 IS NULL OR observed_at < ?2)";
+
+#[derive(Debug, Clone, Copy)]
+pub enum UsageOrder {
+    Newest,
+    Oldest,
 }
 
 const AGENT_SELECT: &str = "SELECT slug, anthropic_id, anthropic_version, definition_sha256,
@@ -710,7 +745,8 @@ mod tests {
         db.upsert_usage(&snap("sesn_3", "blueweb-client", "300", false))
             .unwrap();
 
-        let by_agent = db.usage_by_agent().unwrap();
+        let all = UsageWindow::default();
+        let by_agent = db.usage_by_agent(&all).unwrap();
         assert_eq!(by_agent.len(), 2);
         let jarvis = by_agent.iter().find(|a| a.agent_slug == "jarvis").unwrap();
         assert_eq!(jarvis.session_count, 2);
@@ -723,13 +759,67 @@ mod tests {
         assert_eq!(blueweb.total_list_cost_cents, 300);
         assert_eq!(blueweb.budget_reached_count, 0);
 
-        let recent = db.usage_rows(2).unwrap();
+        let recent = db.usage_rows(&all, UsageOrder::Newest, Some(2)).unwrap();
         assert_eq!(recent.len(), 2, "limit is respected");
         assert_eq!(
             recent[0].session_id, "sesn_3",
             "most recently observed first"
         );
         assert_eq!(recent[0].list_cost_cents.unwrap().get(), 300);
+
+        let oldest = db.usage_rows(&all, UsageOrder::Oldest, None).unwrap();
+        assert_eq!(oldest.len(), 3, "no limit returns everything");
+        assert_eq!(oldest[0].session_id, "sesn_1", "oldest first");
+    }
+
+    #[test]
+    fn usage_window_is_half_open_on_observed_at() {
+        let db = Db::in_memory().unwrap();
+        let snap = |session: &str| UsageSnapshot {
+            session_id: session.into(),
+            agent_slug: "jarvis".into(),
+            environment_slug: None,
+            list_cost_cents: Some("5".parse().unwrap()),
+            input_tokens: None,
+            output_tokens: None,
+            active_seconds: None,
+            budget_reached: false,
+            last_event_type: "session.status_idled".into(),
+        };
+        for s in ["sesn_a", "sesn_b", "sesn_c"] {
+            db.upsert_usage(&snap(s)).unwrap();
+        }
+        // Pin observed_at by hand — upsert_usage always writes now().
+        db.with(|c| {
+            c.execute_batch(
+                "UPDATE session_usage SET observed_at = '2026-09-14T23:59:59Z' WHERE session_id = 'sesn_a';
+                 UPDATE session_usage SET observed_at = '2026-09-15T00:00:00Z' WHERE session_id = 'sesn_b';
+                 UPDATE session_usage SET observed_at = '2026-09-16T00:00:00Z' WHERE session_id = 'sesn_c';",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let window = UsageWindow {
+            since: Some("2026-09-15T00:00:00Z".into()),
+            until: Some("2026-09-16T00:00:00Z".into()),
+        };
+        let rows = db.usage_rows(&window, UsageOrder::Oldest, None).unwrap();
+        let ids: Vec<&str> = rows.iter().map(|r| r.session_id.as_str()).collect();
+        assert_eq!(ids, ["sesn_b"], "since is inclusive, until exclusive");
+        let by_agent = db.usage_by_agent(&window).unwrap();
+        assert_eq!(by_agent[0].session_count, 1);
+
+        let open_ended = UsageWindow {
+            since: Some("2026-09-15T00:00:00Z".into()),
+            until: None,
+        };
+        assert_eq!(
+            db.usage_rows(&open_ended, UsageOrder::Oldest, None)
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]
