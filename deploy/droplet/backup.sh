@@ -51,8 +51,12 @@ printf 'stamp=%s\nagents=%s\ndb_bytes=%s\n' "$STAMP" "$agents" "$(stat -c %s "$T
 # --- encrypt + upload ----------------------------------------------------
 tar -C "$TMP" -cf - control-plane.db env backup.env caddy_data.tar MANIFEST \
   | age -r "$AGE_RECIPIENT" -o "$LOCAL/$NAME"
+chmod 600 "$LOCAL/$NAME"
 
-rclone copy --s3-no-check-bucket "$LOCAL/$NAME" "r2:$R2_BUCKET/"
+# --s3-no-head: Ubuntu's rclone (1.60) re-HEADs the object after upload with
+# a request R2 answers 501 to; the upload itself is fine, but rclone logs an
+# ERROR and retries once. Skipping the read-back avoids the false alarm.
+rclone copy --s3-no-check-bucket --s3-no-head "$LOCAL/$NAME" "r2:$R2_BUCKET/"
 rclone delete "r2:$R2_BUCKET" --min-age "${RETENTION_DAYS}d" --include 'iron-fleet-*.tar.age'
 
 # Keep the newest KEEP_LOCAL on disk for a restore that doesn't need R2.

@@ -9,7 +9,7 @@ added 2026-09-15, decisions still open.
 
 Written for whichever machine picks this up next (Claude memory does not
 travel between machines; this section does). Everything below is verified
-fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–2 are complete.
+fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–5 are complete.
 
 **Mac app repointed** — done 2026-09-15 ~05:25 UTC on the Mac. `url` in
 `~/Library/Application Support/com.ironfleet.app/control-plane.json`
@@ -75,6 +75,39 @@ the whole `practical-compassion` project (it held only the two services
 and the volume). No rollback path to Railway exists now; the droplet's
 `control-plane.db` was a superset of the Railway one, so nothing was lost.
 
+**Phase 5 done 2026-09-16 ~04:55 UTC** (PR #9 `5e73072` + follow-up
+PR #10). control-plane: `GET /usage?since=&until=` (half-open on
+`observed_at`, RFC 3339 or `YYYY-MM-DD`) and `GET /usage/export.csv`, the
+rollup audit trail; deployed via `deploy.sh`, boot sync unchanged
+(4 agents, 1 skill, 3 credentials). Ops on the droplet:
+
+- **Backups:** `iron-fleet-backup.timer` → `backup.sh` daily 07:00 UTC
+  (`Persistent=true`, +0–10 min jitter): online `sqlite3 .backup` +
+  `integrity_check`, `.env`, `backup.env`, Caddy cert/ACME state →
+  `age` → Cloudflare R2 bucket **`iron-fleet-backups`** (token scoped to
+  it, in `backup.env` on the box), 30-day retention, newest 3 kept in
+  `/var/backups/iron-fleet/`. First object `iron-fleet-20260916T0447Z.tar.age`
+  (112 KB). Tools from Ubuntu apt: sqlite3 3.45.1, age 1.1.1, rclone
+  1.60.1 — that rclone needs `--s3-no-head` against R2 (PR #10) or it logs
+  a false `NotImplemented` and retries.
+- **Keys:** age identity on the Mac at `~/.config/iron-fleet/backup.key`
+  (0600; recipient `age1dqjde94au3zs3xl98hlleskl424mh3qzry3zq2qkes0qvg26hgmsssjkq7`).
+  Not on the droplet, not in the repo. The Mac has no R2 token yet —
+  `restore.sh latest` there needs one in `./backup.env` or the environment
+  (`deploy/droplet/README.md` "Restore"); until then fetch the object on
+  the droplet and `restore.sh <file>`.
+- **Exit test (restore tested once), 2026-09-16 ~04:52 UTC:** the R2
+  object pulled down, decrypted on the Mac with `restore.sh`
+  (`integrity_check ok`, 4 agents at the live versions, 14 usage rows,
+  ACME state in `caddy_data.tar`), served locally with
+  `SYNC_ON_BOOT=false`: `GET /agents` matched the droplet's ids/versions
+  and `GET /usage/export.csv` was byte-identical to the live one
+  (md5 `a884554877bcc8f20607cda5859bf613`).
+- **Monitoring:** UptimeRobot, two HTTPS monitors on the `/healthz` URLs,
+  5-min interval, email alerts (set up by the user 2026-09-16).
+- **OS:** verified `ufw` = 22/tcp 80/tcp 443/tcp 443/udp only,
+  `unattended-upgrades` active, 19 GB free.
+
 **Phase 4 done 2026-09-16 ~04:00 UTC** (PR #7 `ab6263a`, app-only — no
 droplet change). Third tab "Jarvis": hold the orb (or Space), talk,
 release; the first utterance is `POST /sessions` for `jarvis`, later ones
@@ -121,8 +154,8 @@ filter that returns 403 for `opustower.dev` ("Unrated"). It is not the
 droplet — check for the FortiGuard block page before debugging Caddy.
 The Mac must be on another network (hotspot) to use the app.
 
-**Next:** Phase 5 (usage/audit/ops) or Phase 6's decisions (link, models,
-GPU sharing); independent.
+**Next:** Phase 6's decisions (link, models, GPU sharing). Phases 0–5
+are done; nothing on the droplet is pending.
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
@@ -395,7 +428,8 @@ What "history and audit" means under constraint 1:
   ELK — not on 1 GB, and not worth it for two binaries.
 - OS: `unattended-upgrades` (already on), `ufw` allowing 22/80/443 only.
 
-**Exit:** a restore from backup has been tested once.
+**Exit:** a restore from backup has been tested once. **Met 2026-09-16** —
+see "Resume here".
 
 ### Phase 6 — Local inference on the rig (Ollama)
 
