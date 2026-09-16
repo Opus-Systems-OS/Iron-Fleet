@@ -6,6 +6,7 @@ mod config;
 mod db;
 mod error;
 mod http;
+mod inference;
 mod mcp_fleet;
 mod money;
 mod registry;
@@ -88,6 +89,17 @@ async fn run() -> error::Result<()> {
     let signing_key = webhook::signature::SigningKey::parse(&cfg.webhook_signing_key)
         .map_err(|e| error::Error::Config(format!("ANTHROPIC_WEBHOOK_SIGNING_KEY: {e}")))?;
 
+    let inference = match &cfg.inference_url {
+        Some(url) => {
+            tracing::info!(url, "inference backend configured");
+            Some(inference::Inference::new(url)?)
+        }
+        None => {
+            tracing::info!("no INFERENCE_URL — /inference/* disabled");
+            None
+        }
+    };
+
     let state = http::AppState {
         api,
         db,
@@ -96,6 +108,7 @@ async fn run() -> error::Result<()> {
         control_plane_token: Arc::new(cfg.control_plane_token.clone()),
         console_workspace: Arc::new(cfg.anthropic_workspace.clone()),
         mcp_fleet_vault_id: Arc::new(mcp_fleet_vault_id),
+        inference: Arc::new(inference),
     };
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], cfg.port));

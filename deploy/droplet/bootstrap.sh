@@ -94,6 +94,32 @@ systemctl daemon-reload
 systemctl enable --now iron-fleet-backup.timer >/dev/null
 echo "backup timer: $(systemctl is-active iron-fleet-backup.timer), next $(systemctl show iron-fleet-backup.timer -p NextElapseUSecRealtime --value)"
 
+# --- tailscale (Phase 6) ---------------------------------------------------
+# The rig's Ollama is reached over the tailnet, nothing else. Installed from
+# Tailscale's apt repo (the same steps https://tailscale.com/install.sh runs
+# for Ubuntu, written out rather than piped). Only outbound WireGuard UDP;
+# ufw stays as above, no subnet routes, no exit node.
+if command -v tailscale >/dev/null; then
+  echo "tailscale: already installed ($(tailscale version | head -1))"
+else
+  export DEBIAN_FRONTEND=noninteractive
+  . /etc/os-release
+  curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.noarmor.gpg"     -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+  curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.tailscale-keyring.list"     -o /etc/apt/sources.list.d/tailscale.list
+  apt-get update -q
+  apt-get install -y -q tailscale
+  echo "tailscale: installed ($(tailscale version | head -1))"
+fi
+systemctl enable --now tailscaled >/dev/null
+if tailscale status >/dev/null 2>&1; then
+  echo "tailscale: up, $(tailscale ip -4)"
+else
+  echo "tailscale: not logged in — open the URL it prints (GitHub identity, same tailnet as the rig)"
+  # Blocks until the login completes or 10 minutes pass; re-run bootstrap after.
+  tailscale up --hostname=opustower --timeout=10m
+  echo "tailscale: up, $(tailscale ip -4)"
+fi
+
 cat <<'NEXT'
 
 bootstrap done. Next, in this order (see deploy/droplet/README.md):
@@ -102,4 +128,6 @@ bootstrap done. Next, in this order (see deploy/droplet/README.md):
   3. first start:         /opt/iron-fleet/deploy/droplet/deploy.sh
   4. fill in:             /opt/iron-fleet/deploy/droplet/backup.env
      then run once:       systemctl start iron-fleet-backup.service && journalctl -u iron-fleet-backup -n 1
+  5. rig link (Phase 6):  tailscale status  should list the rig; then set
+     INFERENCE_URL in .env and re-run deploy.sh. See "Rig link" in the README.
 NEXT

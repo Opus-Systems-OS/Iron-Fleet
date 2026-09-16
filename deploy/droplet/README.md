@@ -176,3 +176,33 @@ access logs are the whole observability story for two binaries on 1 GB.
 swapfile. Check with `ufw status verbose` and
 `systemctl is-active unattended-upgrades`. Docker publishes only Caddy's
 ports, so the services are unreachable except through Caddy.
+
+### Rig link (Phase 6)
+
+The control plane reaches the rig's Ollama over Tailscale and nothing
+else: `bootstrap.sh` installs `tailscale` from its apt repo and runs
+`tailscale up` (hostname `opustower`) once, printing a login URL — same
+GitHub identity as the rig, so both land on one tailnet. `ufw` is
+untouched; WireGuard is outbound UDP from this box. `INFERENCE_URL` in
+`.env` is the rig's `100.x` address (`deploy/rig/setup.ps1` prints it);
+the routes don't exist while it's unset.
+
+Checks, on the box:
+
+```sh
+tailscale status                       # the rig ("opus") listed, not "offline"
+# From inside the compose network — the control-plane image has no curl:
+docker run --rm --network droplet_default curlimages/curl -s http://<rig tailnet IP>:11434/api/tags
+# expect: {"models":[{"name":"qwen3:8b",...},{"name":"nomic-embed-text",...}]}
+docker compose logs control-plane | grep -E "inference backend|INFERENCE_URL"
+```
+
+Containers on the default bridge reach tailnet addresses through the
+host's routing table (`tailscale0`), so nothing in `docker-compose.yml`
+changes; the `curlimages/curl` line is what proves it after a rebuild.
+
+A `503 rig_offline` from `/inference/*` means the rig is off, Ollama is
+stopped, or one side's Tailscale is down. That is the designed answer —
+**do nothing on the droplet**. Everything else (`/agents`, `/sessions`,
+`/usage`, jarvis) is unaffected, and the routes come back the moment the
+rig does, with no restart here.

@@ -67,6 +67,13 @@ interface UsageResponse {
   recent: UsageRow[];
 }
 
+interface RigStatus {
+  configured: boolean;
+  online: boolean;
+  models: string[];
+  reason: string | null;
+}
+
 const el = <T extends HTMLElement>(id: string): T => {
   const found = document.getElementById(id);
   if (!found) throw new Error(`missing #${id}`);
@@ -83,6 +90,7 @@ const settingsUrl = el<HTMLInputElement>("settings-url");
 const settingsToken = el<HTMLInputElement>("settings-token");
 const settingsError = el<HTMLSpanElement>("settings-error");
 const agentsBody = el<HTMLTableSectionElement>("agents-body");
+const rigStatus = el<HTMLParagraphElement>("rig-status");
 const sessionsBody = el<HTMLTableSectionElement>("sessions-body");
 const tabs = el<HTMLElement>("tabs");
 const tabFleet = el<HTMLElement>("tab-fleet");
@@ -199,6 +207,39 @@ tabs.addEventListener("click", (e) => {
 });
 
 // ---- fleet tab ----------------------------------------------------------
+
+// Phase 6: one line above the agents table. Hidden when the deployment has
+// no INFERENCE_URL; otherwise online + model tags, or offline. Polled on
+// its own, never inside refresh()'s Promise.all — the control plane's 5 s
+// connect timeout on a rig that is off must not delay agents and sessions.
+let rigInFlight = false;
+
+async function refreshRig() {
+  if (rigInFlight) return;
+  rigInFlight = true;
+  try {
+    renderRig(await invoke<RigStatus>("get_inference_models"));
+  } catch {
+    // A transport error here is the same one refresh() is about to show.
+    rigStatus.hidden = true;
+  } finally {
+    rigInFlight = false;
+  }
+}
+
+function renderRig(rig: RigStatus) {
+  rigStatus.hidden = !rig.configured;
+  if (!rig.configured) return;
+  const badge = rig.online
+    ? `<span class="badge badge-idle">online</span>`
+    : `<span class="badge badge-unknown">offline</span>`;
+  const detail = rig.online
+    ? `<span class="mono">${escapeHtml(rig.models.join(", ") || "no models pulled")}</span>`
+    : rig.reason
+      ? `<span class="dim" title="${escapeHtml(rig.reason)}">503 rig_offline</span>`
+      : "";
+  rigStatus.innerHTML = `<span>Rig</span> ${badge} ${detail}`;
+}
 
 function renderAgents(agents: Agent[]) {
   if (agents.length === 0) {
@@ -451,6 +492,7 @@ async function refresh() {
   try {
     if (activeTab === "jarvis") return;
     if (activeTab === "fleet") {
+      void refreshRig();
       const [agents, sessions] = await Promise.all([
         invoke<Agent[]>("list_agents"),
         invoke<SessionListEnvelope>("list_sessions"),
