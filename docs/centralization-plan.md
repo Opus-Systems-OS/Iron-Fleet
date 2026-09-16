@@ -155,8 +155,24 @@ filter that returns 403 for `opustower.dev` ("Unrated"). It is not the
 droplet — check for the FortiGuard block page before debugging Caddy.
 The Mac must be on another network (hotspot) to use the app.
 
-**Next:** Phase 6's decisions (link, models, GPU sharing). Phases 0–5
-are done; nothing on the droplet is pending.
+**Phase 6 started 2026-09-16 ~05:15 UTC — decisions made, nothing built.**
+The four "decide first" items are settled (Tailscale link; `qwen3:8b` +
+`nomic-embed-text`; `OLLAMA_MAX_LOADED_MODELS=1`/`KEEP_ALIVE=5m`; app gets
+only a rig online/offline line) and recorded in `CLAUDE.md` "Open
+decisions". The approved implementation plan is **`docs/phase-6-plan.md`**
+— execute it from there, in its "Order of work". Rig facts as of the
+start: Ollama installed (version unchecked), no Tailscale, the worker has
+never run live — so the exit clause "a `gpu-compute` session calls the
+local model in a tool step" is explicitly left open until Stage 2's first
+live run; everything else in the phase is in scope.
+
+Work moved from the Mac to the rig at the user's request. Branch
+`phase-6-inference` holds only this hand-off commit; continue on it. Not
+started: every file in the plan's Parts A–D. Mac-side leftovers that don't
+block: the Mac has `age`/`rclone` installed and the age identity at
+`~/.config/iron-fleet/backup.key`; the Mac has no R2 token.
+
+**Next:** Phase 6 per `docs/phase-6-plan.md`.
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
