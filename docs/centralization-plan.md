@@ -1,9 +1,10 @@
 # Centralizing on the droplet — plan
 
-**Status (2026-09-16):** Phases 0–5 done — the droplet is the only
-deployment; the Railway project is deleted and the repo has no Railway
-config left. Phase 6 (local inference on the rig) in progress: code and
-runbooks on branch `phase-6-inference`, rig set up; droplet side pending.
+**Status (2026-09-16, ~07:05 UTC):** Phases 0–5 done — the droplet is the
+only deployment. Phase 6 (local inference on the rig) is **live**: PR #12
+merged and deployed, rig and droplet on one tailnet, exit checks 1 and 3
+met; exit clause 2 waits on the worker. Three small follow-ups listed in
+"Resume here".
 
 ## Resume here
 
@@ -230,18 +231,56 @@ Rig evidence, 2026-09-16 (`setup.ps1` then a first prompt, then
 - User env: `OLLAMA_HOST=127.0.0.1:11434`, `OLLAMA_KEEP_ALIVE=5m`,
   `OLLAMA_MAX_LOADED_MODELS=1`.
 
-**Next, in order** (plan steps 2, 4, 5):
+**Droplet side done 2026-09-16 ~07:00 UTC** (PR #12 merged as `958e0d3`,
+image run `35065724825`; all commands run from the rig over SSH with the
+rig's dedicated `~/.ssh/droplet` key, `Host droplet` in its ssh config):
 
-1. Merge `phase-6-inference`; `deploy.sh` on the droplet with no
-   `INFERENCE_URL` yet → `GET /inference/models` must be `404`, `/agents`
-   unchanged, boot sync rolls `gpu-compute` one version.
-2. On the droplet: `bootstrap.sh` (installs Tailscale, prints the login
-   URL — click it as `Opus1247`), then `tailscale status` lists `opus`;
-   `docker run --rm --network droplet_default curlimages/curl -s
-   http://100.79.233.8:11434/api/tags` returns the two tags. Set
-   `INFERENCE_URL=http://100.79.233.8:11434` in `.env`, `deploy.sh`.
-3. Exit checks 1 and 3 from `docs/phase-6-plan.md`; Mac rebuild for the
-   Fleet tab line; docs PR with the evidence; delete `docs/phase-6-plan.md`.
+- `bootstrap.sh` (piped through `tr -d ''` — the Windows checkout is
+  CRLF): Tailscale 1.102.4 installed from the apt repo, `tailscale up`
+  authorised as `Opus1247`; droplet is **`opustower` = `100.108.133.31`**.
+  First attempt hit the `unattended-upgrades` dpkg lock; re-run after it
+  freed. `tailscale status` on the droplet lists `opus 100.79.233.8`.
+- Reachability from inside the compose network:
+  `docker run --rm --network droplet_default curlimages/curl -s
+  http://100.79.233.8:11434/api/tags` → both models. No compose change.
+- `deploy.sh` **without** `INFERENCE_URL`: boot sync `agents_updated: 1`
+  (`gpu-compute` → **v2**), log `no INFERENCE_URL — /inference/* disabled`;
+  `GET /inference/models` → **404**, `/agents` and `/usage` → 200.
+- `INFERENCE_URL=http://100.79.233.8:11434` appended to `.env`,
+  `docker compose up -d control-plane`: log `inference backend
+  configured url="http://100.79.233.8:11434"`.
+- **Exit 1 met**, via `https://fleet.opustower.dev` from the droplet:
+  `/inference/models` → the two tags; `/inference/chat` `stream:false`
+  on `qwen3:8b` → a completion in 2.5 s round trip (rig `ollama ps`
+  `100% GPU`, `nvidia-smi` 6948 MiB); streaming → HTTP/2 200,
+  `content-type: application/x-ndjson`, `x-accel-buffering: no`, 16
+  frames arriving incrementally (+0.27 s … +0.42 s); `/inference/embeddings`
+  on `nomic-embed-text` → 768 floats; unknown model → `404 inference`
+  with `upstream_status: 404`; missing `messages` → `400 invalid_request`.
+- **Exit 3 met**: rig `tailscale down` → `/inference/chat` **503
+  `rig_offline`** in **5.07 s** (the connect timeout), `Retry-After: 5`;
+  `/agents`, `/sessions`, `/usage`, `/healthz` all 200 throughout. Rig
+  `tailscale up` → next call answered in 3.4 s, control-plane container
+  never restarted. Note: with only `tailscale serve --tcp=11434 off` (rig
+  still on the tailnet) the 503 takes ~31 s — tailscaled accepts the TCP
+  connection into its netstack and stalls, so hyper reports `SendRequest`
+  rather than a connect failure. Real rig-off is the 5 s path.
+
+**Left for the next session** (in this order):
+
+1. `RigOffline` message: `src/inference.rs` `classify` prints only the
+   first error source (`client error (Connect)`); walk the whole
+   `source()` chain so the leaf (`connect timed out` / `connection
+   refused`) shows. Small, tested change, was about to be made when the
+   session ended; needs a merge + `deploy.sh` to land.
+2. App: `npm run tauri build -- --no-bundle` was started on the rig
+   (`app/` frontend + `target/release/app.exe`); launch it, Fleet tab
+   should show `Rig · online · nomic-embed-text:latest, qwen3:8b`, and
+   `Rig · offline` with the rig's Tailscale down while the tables keep
+   refreshing. Then the Mac rebuild.
+3. Commit `.gitignore` (`.claude/settings.local.json`), delete
+   `docs/phase-6-plan.md` (its content is now here), update `CLAUDE.md`
+   "Open decisions" with the droplet's tailnet address.
 
 **Open, by design:** exit clause 2 (a `gpu-compute` session calling
 Ollama in a tool step) waits on the worker's first live run. One thing to
@@ -251,7 +290,8 @@ Windows that address arrives on a non-loopback interface, so the worker
 may need the container to use the tailnet IP or Ollama to bind wider.
 Not changed now; it's the worker weekend's problem, not this phase's.
 
-**Next:** step 1 above.
+**Next:** the three items above; then Phase 6 is closed except exit
+clause 2.
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
@@ -623,12 +663,12 @@ the local model in a tool step and its Claude-side cost still shows in
 Usage; with the rig off, the same `/inference/chat` returns `503` and
 nothing else in the fleet changes.
 
-**Met (2026-09-16, partial):** build steps 1 (as the tray app at logon,
-not a service — see `deploy/rig/README.md` "Ollama at login"), 3, 4 and 5
-are built and tested on branch `phase-6-inference`; the rig side of step 2
-is live (`tailscale serve --tcp=11434`). Step 6 (usage counts) is
-deliberately not built. Exit clauses 1 and 3 await the droplet side; exit
-clause 2 awaits the worker's first live run. Progress in "Resume here".
+**Met (2026-09-16):** build steps 1 (as the tray app at logon, not a
+service — see `deploy/rig/README.md` "Ollama at login"), 2, 3, 4 and 5
+are live (PR #12, deployed ~07:00 UTC). Step 6 (usage counts) is
+deliberately not built. Exit clauses 1 and 3 verified through
+`fleet.opustower.dev`; exit clause 2 awaits the worker's first live run.
+Evidence in "Resume here".
 
 ## Explicitly not in this plan
 

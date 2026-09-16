@@ -9,3 +9,6 @@
 .DS_Store
 __pycache__/
 /target.nosync
+
+# Claude Code per-machine settings
+.claude/settings.local.json
