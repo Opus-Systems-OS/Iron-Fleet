@@ -490,3 +490,132 @@ body {
 .entry-system.alert {
   color: var(--alert);
 }
+
+/* ---- Jarvis view (voice) --------------------------------------------------- */
+
+.jarvis {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding-block: 12px;
+}
+
+.orb {
+  --orb-color: var(--text-dim);
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  background: radial-gradient(circle at 38% 35%, rgba(255, 255, 255, 0.35), transparent 45%),
+    radial-gradient(circle, var(--orb-color) 0%, color-mix(in srgb, var(--orb-color) 55%, var(--bg)) 70%, transparent 72%);
+  box-shadow: 0 0 40px color-mix(in srgb, var(--orb-color) 45%, transparent);
+  transition: box-shadow 0.3s ease, transform 0.2s ease;
+}
+
+.orb:active {
+  transform: scale(0.96);
+}
+
+.orb-idle {
+  --orb-color: var(--accent);
+  animation: orb-breathe 4s ease-in-out infinite;
+}
+
+.orb-listening {
+  --orb-color: var(--ok);
+  animation: orb-pulse 1s ease-in-out infinite;
+}
+
+.orb-thinking {
+  --orb-color: var(--warn);
+  animation: orb-spin 1.6s linear infinite;
+}
+
+.orb-speaking {
+  --orb-color: var(--accent);
+  animation: orb-pulse 0.6s ease-in-out infinite;
+}
+
+.orb-error {
+  --orb-color: var(--alert);
+  animation: none;
+}
+
+.orb-disabled {
+  cursor: default;
+  opacity: 0.45;
+  animation: none;
+}
+
+@keyframes orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+@keyframes orb-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 30px color-mix(in srgb, var(--orb-color) 40%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 70px color-mix(in srgb, var(--orb-color) 75%, transparent);
+  }
+}
+
+@keyframes orb-spin {
+  from {
+    filter: hue-rotate(0deg);
+  }
+  to {
+    filter: hue-rotate(360deg);
+  }
+}
+
+.orb-caption {
+  min-height: 1.4em;
+  color: var(--text-dim);
+  text-align: center;
+  max-width: 600px;
+}
+
+.orb-caption.alert {
+  color: var(--alert);
+}
+
+.voice-transcript {
+  width: 100%;
+  min-height: 160px;
+  max-height: 360px;
+}
+
+.voice-form {
+  width: 100%;
+}
+
+.voice-form input {
+  flex: 1;
+}
+
+.voice-foot {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.voice-session.linkish {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}

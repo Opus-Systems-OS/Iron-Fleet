@@ -37,7 +37,7 @@ are create-only, so no route exists for it anywhere, not just in this UI.
 Click a session row and a panel opens under the table with that session's
 transcript, fed live. The webview never polls for it:
 
-- `invoke("watch_session", { id })` starts a Rust task (`src-tauri/src/stream.rs`)
+- `invoke("watch_session", { id, slot: "fleet" })` starts a Rust task (`src-tauri/src/stream.rs`)
   that opens `GET /sessions/{id}/stream` on the control plane (its proxy of
   the Managed Agents SSE stream), then lists `GET /sessions/{id}/events` for
   history, then tails the stream skipping ids the history already delivered —
@@ -101,9 +101,35 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:9999 ANTHROPIC_API_KEY=test \
 cd app && CONTROL_PLANE_URL=http://127.0.0.1:8080 CONTROL_PLANE_TOKEN=dev npm run tauri dev
 ```
 
-## Not yet
+## Jarvis view (centralization Phase 4)
 
-No orb UI or voice loop; CLAUDE.md describes those as a view inside this
-same app, wired up once `jarvis`'s own session plumbing exists
-(`mcp-fleet/`, stage 5). macOS speech I/O being platform-gated in
-`src-tauri` is a note for that stage, not this one.
+The third tab is the voice loop `CLAUDE.md` describes: a view inside this
+app, not a separate program, and it never calls Claude directly.
+
+- **Hold the orb (or Space) to talk, release to send.** Push-to-talk on
+  purpose: no echo problem (the mic never hears our own speech) and no
+  guessing when you stopped talking. Holding while a reply is being spoken
+  cuts the speech off. There is always a text box too — that is the whole
+  interface on Windows.
+- **Every turn is an ordinary control-plane call.** The first utterance is
+  `create_session` for the `jarvis` agent (so its `"50"` cap applies and
+  the session shows up in Fleet and Usage like any other); later ones are
+  `send_session_event` on the same session. The reply arrives on the same
+  `session-event` feed as the Fleet tab, via `watch_session(id, "voice")` —
+  a second watch slot so the two views don't take each other's stream.
+  `agent.message` text is spoken; `budget_reached` is spoken too and the
+  view then insists on **New conversation** (which just drops the session
+  id — the session itself stays on Anthropic's side, like every session).
+- **Speech input is native macOS**, gated in `src-tauri/src/speech/`:
+  `SFSpeechRecognizer` fed by an `AVAudioEngine` microphone tap through the
+  `objc2-speech` / `objc2-avf-audio` bindings, all on one dedicated thread.
+  Commands: `speech_support` (checks/asks for authorization), `speech_start`,
+  `speech_stop` (returns the transcript); `speech-partial` events carry the
+  live caption. `src-tauri/Info.plist` holds the two usage strings macOS
+  requires — remove them and the process is killed on first use. On other
+  platforms `speech_support` reports `stt: false` and the orb is inert.
+- **Speech output is the webview's `speechSynthesis`** (Web Speech API), so
+  it works on both platforms with no native code.
+
+First use asks for Speech Recognition and Microphone permission; both can
+be revisited in System Settings → Privacy & Security.

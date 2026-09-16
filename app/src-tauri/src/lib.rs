@@ -7,9 +7,11 @@
 
 mod commands;
 mod config;
+mod speech;
 mod stream;
 
 use config::ControlPlaneConfig;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -22,8 +24,11 @@ pub struct AppState {
     pub stream_http: reqwest::Client,
     pub config_path: PathBuf,
     pub config: Mutex<Option<ControlPlaneConfig>>,
-    /// The one live watch (the selected session), aborted on reselect.
-    pub watch: Mutex<Option<commands::Watch>>,
+    /// Live watches by slot (`"fleet"`: the selected row; `"voice"`: the
+    /// Jarvis conversation). Re-watching a slot aborts its previous task.
+    pub watch: Mutex<HashMap<String, commands::Watch>>,
+    /// Speech input (macOS: the speech thread; elsewhere: a stub).
+    pub speech: speech::SpeechHandle,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -48,7 +53,8 @@ pub fn run() {
                 stream_http,
                 config_path,
                 config: Mutex::new(config),
-                watch: Mutex::new(None),
+                watch: Mutex::new(HashMap::new()),
+                speech: speech::SpeechHandle::new(),
             });
             Ok(())
         })
@@ -64,6 +70,9 @@ pub fn run() {
             commands::get_usage,
             commands::watch_session,
             commands::unwatch_session,
+            speech::speech_support,
+            speech::speech_start,
+            speech::speech_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

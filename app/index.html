@@ -18,6 +18,7 @@
         <nav class="tabs" id="tabs">
           <button class="tab-button active" data-tab="fleet" type="button">Fleet</button>
           <button class="tab-button" data-tab="usage" type="button">Usage</button>
+          <button class="tab-button" data-tab="jarvis" type="button">Jarvis</button>
         </nav>
         <div class="topbar-right">
           <span id="last-updated" class="last-updated"></span>
@@ -121,6 +122,23 @@
           </section>
 
         </section>
+        </section>
+
+        <section id="tab-jarvis" class="tab-panel" hidden>
+          <div class="jarvis">
+            <div id="orb" class="orb orb-idle" role="button" tabindex="0" aria-label="Hold to talk"></div>
+            <div id="orb-caption" class="orb-caption">Hold the orb (or Space) to talk</div>
+            <div id="voice-transcript" class="transcript voice-transcript"></div>
+            <form id="voice-form" class="inline-form voice-form">
+              <input id="voice-input" type="text" placeholder="Or type to Jarvis…" autocomplete="off" />
+              <button type="submit">Send</button>
+              <button type="button" id="voice-new" class="mini-button">New conversation</button>
+            </form>
+            <div class="voice-foot">
+              <div id="voice-session" class="mono dim voice-session">No conversation yet</div>
+              <span id="voice-stream" class="stream-pill"></span>
+            </div>
+          </div>
         </section>
 
         <section id="tab-usage" class="tab-panel" hidden>

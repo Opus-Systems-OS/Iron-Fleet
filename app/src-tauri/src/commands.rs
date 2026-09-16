@@ -149,31 +149,34 @@ pub async fn get_usage(state: State<'_, AppState>) -> Result<serde_json::Value, 
 }
 
 /// Start streaming `id`'s events to the webview as `session-event` /
-/// `session-stream-state` Tauri events, replacing any watch already running.
-/// One watch at a time on purpose: it follows the selected row, and the
-/// Fleet tab has exactly one of those.
+/// `session-stream-state` Tauri events, replacing whatever `slot` was
+/// watching before. Two slots exist: `"fleet"` follows the selected row on
+/// the Fleet tab, `"voice"` follows the Jarvis view's conversation — so the
+/// two views never steal each other's stream. Events carry `session_id`;
+/// each view filters on its own.
 #[tauri::command]
 pub async fn watch_session(
     id: String,
+    slot: String,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let cfg = require_config(&state)?;
     let id = valid_id(id)?;
+    let slot = valid_slot(slot)?;
     let handle = tauri::async_runtime::spawn(stream::watch(
         app,
         state.stream_http.clone(),
         cfg,
         id.clone(),
     ));
-    let previous = state
-        .watch
-        .lock()
-        .expect("watch mutex poisoned")
-        .replace(Watch {
+    let previous = state.watch.lock().expect("watch mutex poisoned").insert(
+        slot,
+        Watch {
             session_id: id,
             handle,
-        });
+        },
+    );
     if let Some(prev) = previous {
         prev.handle.abort();
     }
@@ -181,9 +184,23 @@ pub async fn watch_session(
 }
 
 #[tauri::command]
-pub fn unwatch_session(state: State<'_, AppState>) {
-    if let Some(prev) = state.watch.lock().expect("watch mutex poisoned").take() {
+pub fn unwatch_session(slot: String, state: State<'_, AppState>) -> Result<(), String> {
+    let slot = valid_slot(slot)?;
+    if let Some(prev) = state
+        .watch
+        .lock()
+        .expect("watch mutex poisoned")
+        .remove(&slot)
+    {
         prev.handle.abort();
+    }
+    Ok(())
+}
+
+fn valid_slot(slot: String) -> Result<String, String> {
+    match slot.as_str() {
+        "fleet" | "voice" => Ok(slot),
+        _ => Err(format!("unknown watch slot `{slot}`")),
     }
 }
 
