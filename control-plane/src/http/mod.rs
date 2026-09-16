@@ -45,6 +45,7 @@ pub fn router(state: AppState) -> Router {
         .route("/sessions/{id}/stream", get(sessions::stream))
         .route("/sessions/{id}/interrupt", post(sessions::interrupt))
         .route("/usage", get(usage::get))
+        .route("/usage/export.csv", get(usage::export_csv))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_bearer,

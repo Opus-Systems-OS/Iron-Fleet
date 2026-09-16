@@ -72,10 +72,34 @@ chmod 600 .env
 chmod +x deploy.sh
 mkdir -p /root/seed
 
+# --- backups (Phase 5) -----------------------------------------------------
+# Nightly age-encrypted bundle to R2 via a systemd timer. All three tools are
+# in the Ubuntu 24.04 archive. backup.env holds the R2 token and the age
+# recipient; the age identity never comes to this box.
+if ! command -v sqlite3 >/dev/null || ! command -v age >/dev/null || ! command -v rclone >/dev/null; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -q
+  apt-get install -y -q sqlite3 age rclone
+fi
+echo "backup tools: sqlite3 $(sqlite3 --version | cut -d' ' -f1), $(age --version), rclone $(rclone version | head -1 | cut -d' ' -f2)"
+if [[ ! -f backup.env ]]; then
+  cp backup.env.example backup.env
+  echo "backup.env: created from backup.env.example — fill it in"
+fi
+chmod 600 backup.env
+chmod +x backup.sh restore.sh
+install -d -m 700 /var/backups/iron-fleet
+install -m 644 iron-fleet-backup.service iron-fleet-backup.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now iron-fleet-backup.timer >/dev/null
+echo "backup timer: $(systemctl is-active iron-fleet-backup.timer), next $(systemctl show iron-fleet-backup.timer -p NextElapseUSecRealtime --value)"
+
 cat <<'NEXT'
 
 bootstrap done. Next, in this order (see deploy/droplet/README.md):
   1. seed the database:   /root/seed/control-plane.db  (a backup of the live one)
   2. fill in:             /opt/iron-fleet/deploy/droplet/.env
   3. first start:         /opt/iron-fleet/deploy/droplet/deploy.sh
+  4. fill in:             /opt/iron-fleet/deploy/droplet/backup.env
+     then run once:       systemctl start iron-fleet-backup.service && journalctl -u iron-fleet-backup -n 1
 NEXT

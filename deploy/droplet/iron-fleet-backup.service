@@ -1,0 +1,13 @@
+# Installed to /etc/systemd/system by bootstrap.sh. Nothing to enable here —
+# the .timer is what's enabled; this unit is what it starts.
+[Unit]
+Description=Iron-Fleet nightly backup to R2
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/iron-fleet/deploy/droplet/backup.sh
+# 1 GB box: never let the backup compete with the services for memory.
+Nice=10
+IOSchedulingClass=idle

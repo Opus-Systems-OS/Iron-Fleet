@@ -22,7 +22,8 @@ All routes except `/healthz` and `/webhooks/*` require
 | `GET /sessions/{id}/events?page=&limit=&types=` | Proxies `GET /v1/sessions/{id}/events`: the session's event history, oldest first, Anthropic envelope (`data`, `next_page`, `prev_page`) unchanged. `types` is comma-separated and fanned out to the API's repeated `types[]`. |
 | `GET /sessions/{id}/stream?event_deltas=` | Proxies `GET /v1/sessions/{id}/events/stream` as SSE, byte-for-byte: each frame is `data: {event}` with the Anthropic event object unchanged. Held open as long as the caller is; only events emitted after the stream opened arrive, so readers open this first, then list `/events` and dedupe on `id` (the documented reconnect pattern). `event_deltas` is a comma-separated subset of `agent.message,agent.thinking` and opts the connection into token-level `event_start`/`event_delta` previews; anything else is `400`. |
 | `POST /sessions/{id}/interrupt` | Stops a session's in-flight work without ending it. Sends a `user.interrupt` event on `/v1/sessions/{id}/events` — the Managed Agents API has no interrupt route; the interrupted turn ends with an ordinary `session.status_idle` (`stop_reason: end_turn`). |
-| `GET /usage` | `{by_agent: [{agent_slug, session_count, total_list_cost_cents, budget_reached_count}], recent: [...session_usage rows]}`. Built entirely from the local `session_usage` rollup — no Anthropic call, so it's only as fresh as the last webhook delivery. |
+| `GET /usage?since=&until=` | `{window: {since, until}, by_agent: [{agent_slug, session_count, total_list_cost_cents, budget_reached_count}], recent: [...session_usage rows, newest first, max 100]}`. Built entirely from the local `session_usage` rollup — no Anthropic call, so it's only as fresh as the last webhook delivery. `since`/`until` are optional, RFC 3339 or a bare `YYYY-MM-DD` (midnight UTC), and window `observed_at` as `[since, until)`; the echoed `window` is the normalised UTC form. `400 invalid_request` on an unparseable bound or `since >= until`. |
+| `GET /usage/export.csv?since=&until=` | The audit trail: every `session_usage` row in the same window, **oldest first**, as `text/csv` with a `Content-Disposition` filename. Columns are the table's: `session_id,agent_slug,environment_slug,list_cost_cents,input_tokens,output_tokens,active_seconds,budget_reached,last_event_type,observed_at`; nulls are empty, `budget_reached` is `0`/`1`. Rollups only — a session's transcript is behind its `console_url`, never here. |
 | `POST /webhooks/managed-agents` | Anthropic → us. Verifies the Standard Webhooks HMAC, dedupes on event id, handles `session.status_idled` (INFO log) and `session.budget_reached` (WARN log), records a usage rollup. |
 
 Errors are always `{"error": {"type": "...", "message": "..."}}`. Upstream
@@ -224,6 +225,8 @@ curl -H 'Authorization: Bearer dev' -H 'content-type: application/json' \
      -X POST localhost:8080/sessions \
      -d '{"agent_slug":"jarvis","task":"Say hello and stop."}'
 curl -H 'Authorization: Bearer dev' localhost:8080/sessions/<session_id>
+curl -H 'Authorization: Bearer dev' 'localhost:8080/usage?since=2026-09-01&until=2026-10-01'
+curl -H 'Authorization: Bearer dev' -OJ 'localhost:8080/usage/export.csv?since=2026-09-01'   # -OJ: save under the served filename
 ```
 
 To exercise the webhook handler without a public URL, sign a body with the dev
