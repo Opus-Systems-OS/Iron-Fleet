@@ -1,10 +1,12 @@
 # Centralizing on the droplet — plan
 
-**Status (2026-09-16, ~07:05 UTC):** Phases 0–5 done — the droplet is the
-only deployment. Phase 6 (local inference on the rig) is **live**: PR #12
-merged and deployed, rig and droplet on one tailnet, exit checks 1 and 3
-met; exit clause 2 waits on the worker. Three small follow-ups listed in
-"Resume here".
+**Status (2026-09-16):** Phases 0–5 done — the droplet is the only
+deployment. Phase 6 (local inference on the rig) is **live and closed**
+except exit clause 2: PR #12 + PR #13 deployed, rig and droplet on one
+tailnet, exit checks 1 and 3 met, the app's rig line verified online and
+offline on Windows. Exit clause 2 (a `gpu-compute` session calling Ollama
+in a tool step) waits on the worker's first live run. Remaining: the Mac
+app rebuild.
 
 ## Resume here
 
@@ -160,8 +162,8 @@ The Mac must be on another network (hotspot) to use the app.
 The four "decide first" items are settled (Tailscale link; `qwen3:8b` +
 `nomic-embed-text`; `OLLAMA_MAX_LOADED_MODELS=1`/`KEEP_ALIVE=5m`; app gets
 only a rig online/offline line) and recorded in `CLAUDE.md` "Open
-decisions". The approved implementation plan is **`docs/phase-6-plan.md`**
-— execute it from there, in its "Order of work". Rig facts as of the
+decisions". The approved implementation plan was `docs/phase-6-plan.md`,
+deleted once done — everything it specified is recorded below. Rig facts as of the
 start: Ollama installed (version unchecked), no Tailscale, the worker has
 never run live — so the exit clause "a `gpu-compute` session calls the
 local model in a tool step" is explicitly left open until Stage 2's first
@@ -172,7 +174,7 @@ leftovers that don't block: the Mac has `age`/`rclone` installed and the
 age identity at `~/.config/iron-fleet/backup.key`; the Mac has no R2 token.
 
 **Phase 6 build done on the rig 2026-09-16** (branch `phase-6-inference`,
-plan steps 1 and 3 of `docs/phase-6-plan.md` "Order of work"):
+plan steps 1 and 3 of the implementation plan's "Order of work"):
 
 - **Part A** (control-plane): `INFERENCE_URL` → `src/inference.rs`
   (Ollama native API client, 5 s connect / 180 s read / no total timeout),
@@ -268,19 +270,35 @@ rig's dedicated `~/.ssh/droplet` key, `Host droplet` in its ssh config):
 
 **Left for the next session** (in this order):
 
-1. `RigOffline` message: `src/inference.rs` `classify` prints only the
-   first error source (`client error (Connect)`); walk the whole
-   `source()` chain so the leaf (`connect timed out` / `connection
-   refused`) shows. Small, tested change, was about to be made when the
-   session ended; needs a merge + `deploy.sh` to land.
-2. App: `npm run tauri build -- --no-bundle` was started on the rig
-   (`app/` frontend + `target/release/app.exe`); launch it, Fleet tab
-   should show `Rig · online · nomic-embed-text:latest, qwen3:8b`, and
-   `Rig · offline` with the rig's Tailscale down while the tables keep
-   refreshing. Then the Mac rebuild.
-3. Commit `.gitignore` (`.claude/settings.local.json`), delete
-   `docs/phase-6-plan.md` (its content is now here), update `CLAUDE.md`
-   "Open decisions" with the droplet's tailnet address.
+1. ~~`RigOffline` message~~ — done, PR #13. `classify` walks the whole
+   `source()` chain, so the 503 body carries the leaf
+   (`… : tcp connect error: connection refused`) after the host instead
+   of stopping at hyper's `client error (Connect)`. The offline test
+   asserts the leaf is present ("refused" on both Linux and Windows);
+   `cargo test -p control-plane` 60 passed. Merged as `9437cbf` and
+   deployed with `deploy.sh` 2026-09-16 (control-plane container label
+   `revision=9437cbf…`). Verified: rig `tailscale down` →
+   `GET /inference/models` via `fleet.opustower.dev` → **503** in 5.09 s,
+   `Retry-After: 5`, body `rig offline: 100.79.233.8:11434: client error
+   (Connect): tcp connect error: deadline has elapsed` (the connect
+   timeout is the real rig-off leaf; `connection refused` is the
+   localhost case the test covers). `tailscale up` → 200 in 0.39 s.
+2. ~~App (Windows)~~ — done on the rig 2026-09-16 ~17:25 local. Rebuilt
+   with `npm run tauri build -- --no-bundle`; note the binary lands in
+   **`target.nosync/release/app.exe`** (the committed `.cargo/config.toml`
+   sets `target-dir` for the Mac's iCloud problem — it applies on Windows
+   too; a stale `target/release/app.exe` from 2026-09-14 is not the
+   build). Launched: Fleet tab shows
+   `Rig · online · nomic-embed-text:latest, qwen3:8b` above the agents
+   table. With `tailscale down` on the rig it flips to
+   `Rig · offline · 503 rig_offline` and the agents/sessions tables keep
+   their 5 s cadence throughout (the `updated` clock advanced during the
+   outage — `refreshRig` really is outside `refresh()`'s `Promise.all`);
+   `tailscale up` → back to online, no app restart. **The Mac rebuild is
+   still to do** — free disk space first, see the Phase 4 note.
+3. ~~`.gitignore`, delete `docs/phase-6-plan.md`, update `CLAUDE.md`~~ —
+   done. `CLAUDE.md` "Open decisions" now carries both tailnet addresses
+   and points at `deploy/rig/README.md` plus this section.
 
 **Open, by design:** exit clause 2 (a `gpu-compute` session calling
 Ollama in a tool step) waits on the worker's first live run. One thing to
@@ -290,8 +308,10 @@ Windows that address arrives on a non-loopback interface, so the worker
 may need the container to use the tailnet IP or Ollama to bind wider.
 Not changed now; it's the worker weekend's problem, not this phase's.
 
-**Next:** the three items above; then Phase 6 is closed except exit
-clause 2.
+**Next:** the Mac app rebuild (cosmetic — the droplet and the rig are
+done). Then Phase 6 is closed except exit clause 2, and the next real
+piece of work is `worker/`'s first live run (`CLAUDE.md` build order
+stage 2), which is also what unblocks that clause.
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
