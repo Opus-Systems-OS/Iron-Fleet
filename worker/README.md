@@ -11,20 +11,38 @@ Agents API, authenticated as the `rig-gpu` environment (not the account
 `ANTHROPIC_API_KEY`), because the rig owns that key and the control plane
 never sees it after the one-time provisioning message (see below).
 
-## Status: wire protocol unconfirmed
+## Status: superseded by `worker/sdk/` (2026-09-17)
 
-`control-plane/src/anthropic` has fixtures captured from a real run (its
-commit history includes "fix three mismatches found on the first live
-Managed Agents run"). `worker/src/protocol.rs` has no equivalent — nothing
-here has been run against the live API yet. The endpoint paths and field
-names in `protocol.rs` and `client.rs` are a best-effort match to the REST
-conventions the rest of Managed Agents already uses (`/v1/<resource>`,
-`{"type": "...", ...}` error bodies), not a confirmed spec. Expect a
-follow-up fix commit the same way stage 1 needed one, once this runs against
-a real `rig-gpu` claim.
+The wire protocol was checked against the live API and the SDK's own
+worker on 2026-09-17, and it is not what this crate assumed. There is no
+claim-with-tool-calls / post-results queue: the work item is a **lease on
+a session** (`GET …/work/poll` → `ack` → `heartbeat`), and the worker then
+attaches to that session's **event stream**, answers each
+`agent.tool_use` with a `user.tool_result` event, and force-`stop`s the
+item when the session idles. Auth is `Authorization: Bearer <environment
+key>` (Console-generated `sk-ant-oat01-…`, never returned by the API — the
+"printed once at create" path below never fires), with a per-session
+token unpacked from the work item's `secret` for the session calls.
 
-Assumed protocol, all under the `managed-agents-2026-04-01` beta header and
-an `x-environment-key` auth header:
+That is the session-tool-runner + lease state machine Anthropic ships in
+the Python/TypeScript/Go SDKs (`EnvironmentWorker`), and there is no Rust
+SDK. Rather than re-implement it here (CLAUDE.md: don't rebuild a sandbox
+lifecycle), the live path is **`worker/sdk/`** — the SDK worker on the
+same CUDA image. Full protocol table, checks and the first-live-run
+runbook are in `worker/sdk/README.md`.
+
+This crate is kept as-is for now: `exec.rs` (per-session workdir, tool
+timeout) and `gpu.rs` (nvidia-smi status) are still the reference for
+what the rig does per tool call, and the mock in `dev/` still exercises
+the crate's own loop. It is **not** built into the rig image and nothing
+depends on it. Delete it once the SDK worker has served real sessions
+for a while, or revive it only if a Rust-native worker becomes necessary
+(it would need the event-stream runner ported, not just the routes
+renamed). The rest of this file describes the crate as written.
+
+Assumed protocol (wrong, kept for the record), all under the
+`managed-agents-2026-04-01` beta header and an `x-environment-key` auth
+header:
 
 | Route | What it's for |
 |---|---|
@@ -43,7 +61,14 @@ first real run than guess at a tool's input schema.
 
 ## Getting the environment key
 
-`control-plane sync` (or boot, with `SYNC_ON_BOOT`) now provisions
+**Corrected 2026-09-17:** the environments API does not return a key. The
+key is generated in the Console (Workspace → Environments → rig-gpu →
+Generate environment key), shown once, and goes into `worker/sdk/.env` on
+the rig. `rig-gpu` is already provisioned as
+`env_01Tz2CrQM3X4EWDVLGWLY6GH`. What follows is the mechanism as originally
+written; the `eprintln!` branch never fires, the `tracing::warn!` one did.
+
+`control-plane sync` (or boot, with `SYNC_ON_BOOT`) provisions
 `agents/environments/rig-gpu.json` like any other environment. The first time
 it creates a `self_hosted` environment, it prints the id and key **once**,
 via `eprintln!` — never `tracing`, so it can't end up in an aggregated log

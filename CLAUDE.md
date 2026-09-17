@@ -81,7 +81,8 @@ macOS speech I/O is platform-gated in `src-tauri`. Windows is text-only for now.
 ```
 control-plane/   Rust, hosted. Registry, webhooks, budget policy, usage rollups
 app/             Tauri 2. src-tauri/ (Rust) + src/ (frontend)
-worker/          Self-hosted environment worker + CUDA runtime image
+worker/          rig-gpu worker: sdk/ (Anthropic's EnvironmentWorker on the CUDA
+                 image — the live path) + src/ (Rust crate, superseded, reference)
 mcp-fleet/       MCP server wrapping the control plane for the jarvis agent
 agents/          Agent, environment and skill definitions as versioned config
 ```
@@ -110,7 +111,10 @@ Do not start a stage before the one above it works end to end.
 
 1. `control-plane/` — start a session from `curl`, receive a webhook back. No UI.
 2. `worker/` — `rig-gpu` running a throwaway agent against the 5070. Most likely
-   to eat a weekend; do it before any UI depends on it.
+   to eat a weekend; do it before any UI depends on it. **Prepared
+   2026-09-17** (`worker/sdk/`, protocol confirmed, image built on the rig);
+   the first live run needs a Console-generated environment key — runbook
+   in `worker/sdk/README.md`.
 3. `app/` — Tauri shell, Fleet Dashboard, read-only.
 4. Session controls, then the Usage tab.
 5. `mcp-fleet/` — last, once the surface it wraps has stopped moving.

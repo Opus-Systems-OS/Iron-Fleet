@@ -1,0 +1,31 @@
+# Iron-Fleet rig-gpu worker on the rig (Docker Desktop, WSL2 backend).
+#
+#   cd worker/sdk
+#   cp env.example .env          # then fill in the two values; .env is gitignored
+#   docker compose up -d --build
+#   docker compose logs -f
+#
+# The GPU reaches the container through Docker Desktop's WSL2 passthrough —
+# `gpus: all` needs the host NVIDIA driver only, no toolkit install on Windows.
+services:
+  worker:
+    build: .
+    image: iron-fleet-worker-sdk
+    env_file: .env
+    environment:
+      WORKER_WORKDIR: /workspace
+    volumes:
+      - workspace:/workspace
+    # host.docker.internal → the Windows host, for Ollama. Whether Ollama
+    # answers there depends on its bind address — see README "Ollama from a
+    # session".
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    gpus: all
+    restart: unless-stopped
+    # The SDK flushes memory stores for up to 30 s on cancel; give it room.
+    stop_grace_period: 40s
+    stop_signal: SIGTERM
+
+volumes:
+  workspace:
