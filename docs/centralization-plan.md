@@ -4,8 +4,10 @@
 deployment, and **Phase 6 is closed**: all three exit clauses met. Build
 order **stage 2 (the worker) is live**: `worker/sdk/` on the rig served
 its first real `gpu-compute` session (nvidia-smi, then Ollama from a tool
-step), 8 ¢ total, in the Usage rollup. Next real work: stage 5,
-`mcp-fleet`. Remaining cosmetic: the Mac app rebuild.
+step), 8 ¢ total, in the Usage rollup. **Stage 5 passed** the same day:
+jarvis drove all five `mcp-fleet` tools live, dispatching to the rig;
+`get_session_status` gained `last_reply` so it can relay answers. The
+build order is complete. Remaining cosmetic: the Mac app rebuild.
 
 ## Resume here
 
@@ -376,10 +378,46 @@ cold Ollama call only ~3× slower than this one; `OLLAMA_KEEP_ALIVE=5m`
 means back-to-back calls are warm, a session that pauses >5 min pays the
 17.8 s load again. Fine for now.
 
-**Next:** stage 5 — `mcp-fleet` gets its pass now that the control-plane
-surface has settled (CLAUDE.md build order). The worker container is
-`restart: unless-stopped` on the rig; it survives reboots as long as
-Docker Desktop starts with Windows.
+The worker container is `restart: unless-stopped` on the rig; it
+survives reboots as long as Docker Desktop starts with Windows.
+
+### Stage 5: mcp-fleet's pass (2026-09-17)
+
+The deployed `mcp-fleet` (`9437cbf`, `mcp.opustower.dev`, healthz 200)
+already matched the settled control-plane surface: `start_session`
+carries `environment`/`repositories`, `interrupt_session` goes through
+the Phase 3 `user.interrupt` path. The pass was a live drive of all
+five tools through one jarvis session, `sesn_0129niKcavFbza85pJBjLv5G`
+(cloud-default, 50 ¢ cap, low effort), 20 ¢ total:
+
+1. `list_agents` → the four agents with caps, relayed correctly (6 ¢).
+2. `start_session {agent_slug: gpu-compute, task: nvidia-smi…}` →
+   `sesn_014mScwJSHMwi4xXjX26RGEs` on **rig-gpu**; the rig worker claimed
+   it 1 s later, ran `bash`, child answered (5 ¢). Jarvis quoted the id,
+   environment and cap back.
+3. `get_session_status` (idle, "$0.05 of $5.00") then `send_event`
+   ("also report the driver version"). The child had already been
+   released by the worker (60 s idle) — the follow-up **re-queued** it:
+   worker `stop` 14:24:08, re-`claimed` 14:24:20, answered "616.92".
+4. `send_event` (a `sleep 100`) immediately followed by
+   `interrupt_session` → `{"data":[{"type":"user.interrupt"}]}`. The
+   interrupt landed before the child emitted a tool call; the turn ended
+   `end_turn` with nothing run, the worker claimed and released. Phase 3
+   semantics, confirmed from the MCP side.
+5. Queue stats afterwards: `depth 0, pending 0, workers_polling 1`.
+
+**Gap found and fixed (PR #16):** jarvis offered to "check back for the
+answer" and could not — `get_session_status` returned the raw session
+object (~2 KB: the whole agent definition incl. system prompt, plus
+`vault_ids`) and no tool exposed what the child said. Now
+`get_session_status` returns a compact view with `spent_cents`/`cap_cents`
+and `last_reply` (the latest `agent.message`, via a new `order=desc`
+passthrough on control-plane's `/sessions/{id}/events`). Still five
+tools; `mcp-fleet` gained its first tests, one of which fails if the
+router ever grows past five.
+
+**Next:** none of the build order is left. What remains is polish —
+the Mac app rebuild, and whatever the fleet's real use turns up.
 
 **Mac app rebuild** is still the one cosmetic leftover from Phase 6.
 

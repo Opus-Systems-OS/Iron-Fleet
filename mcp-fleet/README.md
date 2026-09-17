@@ -1,7 +1,9 @@
 # mcp-fleet
 
 Stage 5, last in the build order — "once the surface it wraps has stopped
-moving." Wraps `control-plane`'s API as an MCP server over the Streamable
+moving." Passed 2026-09-17: all five tools driven live through a jarvis
+session that dispatched to `gpu-compute` on the rig (evidence in
+`docs/centralization-plan.md` "Stage 5"). Wraps `control-plane`'s API as an MCP server over the Streamable
 HTTP transport (via [`rmcp`](https://github.com/modelcontextprotocol/rust-sdk),
 the official Rust SDK — no reason to hand-roll MCP's JSON-RPC framing), so it
 can be attached to the `jarvis` agent as a remote `mcp_servers` entry.
@@ -18,10 +20,22 @@ CLAUDE.md is explicit about what jarvis may reach through MCP:
 
 `src/server.rs` implements exactly those five as MCP tools, each a thin
 proxy to the matching `control-plane` route (`GET /agents`, `POST /sessions`,
-`GET /sessions/{id}`, `POST /sessions/{id}/events`,
-`POST /sessions/{id}/interrupt`). There is no generic passthrough and no
-sixth tool. Adding one is a CLAUDE.md decision, not a code change to make
-casually.
+`GET /sessions/{id}` + `GET /sessions/{id}/events?order=desc&types=agent.message&limit=1`,
+`POST /sessions/{id}/events`, `POST /sessions/{id}/interrupt`). There is
+no generic passthrough and no sixth tool. Adding one is a CLAUDE.md
+decision, not a code change to make casually — and
+`server::tests::exactly_the_five_jarvis_tools` fails the build if the
+router grows.
+
+`get_session_status` is the one tool that shapes its answer rather than
+passing the control-plane body through (`session_view` in `server.rs`):
+status, `spent_cents` against `cap_cents`, timestamps, and `last_reply` —
+the session's most recent `agent.message` — so jarvis can relay what a
+session it started actually said. The raw session object was ~2 KB per
+call, half of it the embedded agent definition (system prompt included)
+plus `vault_ids`, none of which jarvis has a use for. Found on the stage 5
+pass (2026-09-17): jarvis offered to "check back for the answer" and had
+no way to.
 
 A tool call that fails (bad session id, control plane down, upstream 404...)
 comes back as a normal MCP tool error (`is_error: true`, readable text) —

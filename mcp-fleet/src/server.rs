@@ -14,6 +14,7 @@ use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::{tool, tool_handler, tool_router, ServerHandler};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct StartSessionArgs {
@@ -46,6 +47,44 @@ pub struct SendEventArgs {
     pub session_id: String,
     /// The follow-up message to append to the running session.
     pub task: String,
+}
+
+/// What jarvis gets back from `get_session_status`: the handful of fields
+/// it can act on, plus the session's latest reply so it can relay results.
+/// Deliberately not the raw session object — that embeds the whole agent
+/// definition (system prompt included) and the session's `vault_ids`,
+/// neither of which jarvis has any use for, and it is ~2 KB per call
+/// against a 50 ¢ cap.
+///
+/// `session` is `GET /sessions/{id}`; `latest` is
+/// `GET /sessions/{id}/events?order=desc&types=agent.message&limit=1`.
+fn session_view(session: &Value, latest: &Value) -> Value {
+    let last_reply = latest["data"]
+        .as_array()
+        .and_then(|d| d.first())
+        .and_then(|ev| ev["content"].as_array())
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|b| b["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .filter(|s| !s.is_empty());
+    json!({
+        "session_id": session["id"],
+        "status": session["status"],
+        "title": session["title"],
+        "agent_slug": session["metadata"]["iron_fleet_agent"],
+        "environment": session["metadata"]["iron_fleet_environment"],
+        "cap_cents": session["budget"]["max_list_cost"]["amount"],
+        "spent_cents": session["usage"]["list_cost"]["amount"],
+        "active_seconds": session["usage"]["active_seconds"],
+        "created_at": session["created_at"],
+        "updated_at": session["updated_at"],
+        "last_reply": last_reply,
+        "console_url": session["console_url"],
+    })
 }
 
 fn valid_session_id(id: &str) -> Result<&str, String> {
@@ -103,13 +142,22 @@ impl FleetServer {
         self.client.post("/sessions", &body).await
     }
 
-    #[tool(description = "Get a session's current status, usage, and budget.")]
+    #[tool(
+        description = "Get a session's status (running/idle/terminated), what it has spent against its cap in cents, and its latest reply (last_reply) — use this to check on a session you started and relay what it said."
+    )]
     async fn get_session_status(
         &self,
         Parameters(SessionIdArgs { session_id }): Parameters<SessionIdArgs>,
     ) -> Result<String, String> {
         let id = valid_session_id(&session_id)?;
-        self.client.get(&format!("/sessions/{id}")).await
+        let session = self.client.get_json(&format!("/sessions/{id}")).await?;
+        let latest = self
+            .client
+            .get_json(&format!(
+                "/sessions/{id}/events?order=desc&types=agent.message&limit=1"
+            ))
+            .await?;
+        Ok(session_view(&session, &latest).to_string())
     }
 
     #[tool(description = "Send a follow-up message to a running session.")]
@@ -147,5 +195,81 @@ impl ServerHandler for FleetServer {
              environments, or change a cap — the fleet's shape is defined in the agents/ registry, \
              not from here.",
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// CLAUDE.md's closed list. If this test has to change, that is a
+    /// CLAUDE.md change first.
+    #[test]
+    fn exactly_the_five_jarvis_tools() {
+        let mut names: Vec<String> = FleetServer::tool_router()
+            .list_all()
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "get_session_status",
+                "interrupt_session",
+                "list_agents",
+                "send_event",
+                "start_session",
+            ]
+        );
+    }
+
+    #[test]
+    fn session_ids_are_path_safe_only() {
+        assert!(valid_session_id("sesn_014mScwJSHMwi4xXjX26RGEs").is_ok());
+        assert!(valid_session_id("").is_err());
+        assert!(valid_session_id("sesn_1/../agents").is_err());
+        assert!(valid_session_id("sesn 1").is_err());
+        assert!(valid_session_id("sesn_1?x=1").is_err());
+    }
+
+    #[test]
+    fn session_view_is_compact_and_carries_the_last_reply() {
+        let session = json!({
+            "id": "sesn_1",
+            "status": "idle",
+            "title": "Run nvidia-smi",
+            "agent": {"system": "SECRET PROMPT", "id": "agent_1"},
+            "vault_ids": ["vlt_1"],
+            "metadata": {"iron_fleet_agent": "gpu-compute", "iron_fleet_environment": "rig-gpu"},
+            "budget": {"max_list_cost": {"amount": "500", "currency": "USD"}, "type": "limit"},
+            "usage": {"active_seconds": 11.9, "list_cost": {"amount": "6", "currency": "USD"}},
+            "created_at": "2026-09-17T14:23:02Z",
+            "updated_at": "2026-09-17T14:42:03Z",
+            "console_url": "https://platform.claude.com/x/sesn_1"
+        });
+        let latest = json!({"data": [{"type": "agent.message", "content": [
+            {"type": "text", "text": "The driver "}, {"type": "text", "text": "is 616.92."}
+        ]}]});
+        let v = session_view(&session, &latest);
+        assert_eq!(v["agent_slug"], "gpu-compute");
+        assert_eq!(v["environment"], "rig-gpu");
+        assert_eq!(v["cap_cents"], "500");
+        assert_eq!(v["spent_cents"], "6");
+        assert_eq!(v["last_reply"], "The driver is 616.92.");
+        let text = v.to_string();
+        assert!(!text.contains("SECRET PROMPT"));
+        assert!(!text.contains("vlt_1"));
+    }
+
+    #[test]
+    fn session_view_without_a_reply_yet() {
+        let v = session_view(
+            &json!({"id": "sesn_1", "status": "running"}),
+            &json!({"data": []}),
+        );
+        assert_eq!(v["status"], "running");
+        assert!(v["last_reply"].is_null());
+        assert!(v["spent_cents"].is_null());
     }
 }
