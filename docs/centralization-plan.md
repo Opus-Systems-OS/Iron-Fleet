@@ -416,6 +416,20 @@ passthrough on control-plane's `/sessions/{id}/events`). Still five
 tools; `mcp-fleet` gained its first tests, one of which fails if the
 router ever grows past five.
 
+PR #16 merged and deployed 2026-09-17 ~15:20 UTC (`af03677` on both
+containers, healthz 200). **One verification left, doable from the Mac
+(the rig only needs to keep its worker container running):** send jarvis
+session `sesn_0129niKcavFbza85pJBjLv5G` a message like "check on the
+gpu-compute session and tell me exactly what it last said", via
+`POST https://fleet.opustower.dev/sessions/sesn_0129niKcavFbza85pJBjLv5G/events`
+`{task: …}` with the `CONTROL_PLANE_TOKEN` from the droplet's `.env`
+(`ssh root@198.199.66.109`). Expect an `agent.mcp_tool_use
+get_session_status` whose result is the compact view with `last_reply:
+"The NVIDIA driver version is 616.92 (on the RTX 5070)."` and jarvis
+quoting it. Record the event ids here; that closes stage 5. `/tmp/ev.py`
+on the droplet prints a session's events compactly
+(`curl … /events?limit=100 | python3 /tmp/ev.py 63`).
+
 **Next:** none of the build order is left. What remains is polish —
 the Mac app rebuild, and whatever the fleet's real use turns up.
 
