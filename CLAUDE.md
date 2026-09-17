@@ -117,6 +117,9 @@ Do not start a stage before the one above it works end to end.
 3. `app/` — Tauri shell, Fleet Dashboard, read-only.
 4. Session controls, then the Usage tab.
 5. `mcp-fleet/` — last, once the surface it wraps has stopped moving.
+   **Passed 2026-09-17**: all five tools driven live by a jarvis session
+   dispatching to the rig; `get_session_status` returns a compact view
+   with `last_reply`.
 
 ## Open decisions
 

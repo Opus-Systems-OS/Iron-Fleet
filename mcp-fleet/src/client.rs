@@ -34,6 +34,12 @@ impl ControlPlaneClient {
     }
 
     pub async fn get(&self, path: &str) -> Result<String, String> {
+        self.get_json(path).await.map(|v| v.to_string())
+    }
+
+    /// `get`, but the parsed body — for tools that compose a view out of
+    /// more than one control-plane response instead of passing one through.
+    pub async fn get_json(&self, path: &str) -> Result<Value, String> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self
             .http
@@ -42,7 +48,7 @@ impl ControlPlaneClient {
             .send()
             .await
             .map_err(|e| format!("could not reach the control plane: {e}"))?;
-        Self::read_body(resp).await
+        Self::read_json(resp).await
     }
 
     pub async fn post(&self, path: &str, body: &Value) -> Result<String, String> {
@@ -71,6 +77,10 @@ impl ControlPlaneClient {
     }
 
     async fn read_body(resp: reqwest::Response) -> Result<String, String> {
+        Self::read_json(resp).await.map(|v| v.to_string())
+    }
+
+    async fn read_json(resp: reqwest::Response) -> Result<Value, String> {
         let status = resp.status();
         let body: Value = resp
             .json()
@@ -82,6 +92,6 @@ impl ControlPlaneClient {
                 .unwrap_or("no error message in response");
             return Err(format!("{status}: {message}"));
         }
-        Ok(body.to_string())
+        Ok(body)
     }
 }

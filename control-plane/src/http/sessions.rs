@@ -300,7 +300,10 @@ pub async fn interrupt(
 }
 
 /// Query for `GET /sessions/{id}/events`. `types` is comma-separated here
-/// and fanned out to the API's repeated `types[]`.
+/// and fanned out to the API's repeated `types[]`; `order` (`asc`, the
+/// default, or `desc`) passes through like the sessions list's — `desc`
+/// with `types=agent.message&limit=1` is how mcp-fleet fetches a session's
+/// latest reply for jarvis.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EventsQuery {
@@ -310,11 +313,14 @@ pub struct EventsQuery {
     pub limit: Option<u32>,
     #[serde(default)]
     pub types: Option<String>,
+    #[serde(default)]
+    pub order: Option<String>,
 }
 
-/// Event history, oldest first, as the Anthropic envelope (`data`,
-/// `next_page`, `prev_page`) unchanged. Paired with `stream` for the
-/// documented reconnect pattern: open the stream, list history, dedupe on `id`.
+/// Event history, oldest first unless `order=desc`, as the Anthropic
+/// envelope (`data`, `next_page`, `prev_page`) unchanged. Paired with
+/// `stream` for the documented reconnect pattern: open the stream, list
+/// history, dedupe on `id`.
 pub async fn list_events(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -334,6 +340,9 @@ pub async fn list_events(
     }
     for t in csv(q.types.as_deref()) {
         query.push(("types[]", t));
+    }
+    if let Some(order) = &q.order {
+        query.push(("order", order.clone()));
     }
     let borrowed: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
     Ok(Json(state.api.list_events_raw(&id, &borrowed).await?))
