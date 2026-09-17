@@ -101,11 +101,19 @@ impl Inference {
                 .nth(1)
                 .unwrap_or(&self.base_url)
                 .to_owned();
-            // `e` prints its own URL; the chained source is the useful part.
-            let cause = std::error::Error::source(&e)
-                .map(ToString::to_string)
-                .unwrap_or_else(|| e.to_string());
-            Error::RigOffline(format!("{host}: {cause}"))
+            // `e` prints its own URL; the chained sources are the useful
+            // part — hyper's "client error (Connect)" alone says nothing,
+            // the leaf ("connect timed out", "connection refused") does.
+            let mut cause = Vec::new();
+            let mut src = std::error::Error::source(&e);
+            while let Some(s) = src {
+                cause.push(s.to_string());
+                src = s.source();
+            }
+            if cause.is_empty() {
+                cause.push(e.to_string());
+            }
+            Error::RigOffline(format!("{host}: {}", cause.join(": ")))
         } else {
             Error::UpstreamTransport(e)
         }
@@ -175,6 +183,9 @@ mod tests {
         match inf.models().await {
             Err(Error::RigOffline(msg)) => {
                 assert!(msg.starts_with(&format!("127.0.0.1:{port}: ")), "{msg}");
+                // The leaf of the source chain, not hyper's opaque
+                // "client error (Connect)": both OSes say "refused".
+                assert!(msg.to_lowercase().contains("refused"), "{msg}");
             }
             other => panic!("expected RigOffline, got {other:?}"),
         }
