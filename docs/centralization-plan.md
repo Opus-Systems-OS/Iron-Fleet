@@ -1,12 +1,11 @@
 # Centralizing on the droplet — plan
 
-**Status (2026-09-16):** Phases 0–5 done — the droplet is the only
-deployment. Phase 6 (local inference on the rig) is **live and closed**
-except exit clause 2: PR #12 + PR #13 deployed, rig and droplet on one
-tailnet, exit checks 1 and 3 met, the app's rig line verified online and
-offline on Windows. Exit clause 2 (a `gpu-compute` session calling Ollama
-in a tool step) waits on the worker's first live run. Remaining: the Mac
-app rebuild.
+**Status (2026-09-17):** Phases 0–6 done — the droplet is the only
+deployment, and **Phase 6 is closed**: all three exit clauses met. Build
+order **stage 2 (the worker) is live**: `worker/sdk/` on the rig served
+its first real `gpu-compute` session (nvidia-smi, then Ollama from a tool
+step), 8 ¢ total, in the Usage rollup. Next real work: stage 5,
+`mcp-fleet`. Remaining cosmetic: the Mac app rebuild.
 
 ## Resume here
 
@@ -237,7 +236,8 @@ Rig evidence, 2026-09-16 (`setup.ps1` then a first prompt, then
 image run `35065724825`; all commands run from the rig over SSH with the
 rig's dedicated `~/.ssh/droplet` key, `Host droplet` in its ssh config):
 
-- `bootstrap.sh` (piped through `tr -d ''` — the Windows checkout is
+- `bootstrap.sh` (piped through `tr -d '
+'` — the Windows checkout is
   CRLF): Tailscale 1.102.4 installed from the apt repo, `tailscale up`
   authorised as `Opus1247`; droplet is **`opustower` = `100.108.133.31`**.
   First attempt hit the `unattended-upgrades` dpkg lock; re-run after it
@@ -301,17 +301,87 @@ rig's dedicated `~/.ssh/droplet` key, `Host droplet` in its ssh config):
    and points at `deploy/rig/README.md` plus this section.
 
 **Open, by design:** exit clause 2 (a `gpu-compute` session calling
-Ollama in a tool step) waits on the worker's first live run. One thing to
-confirm then: the agent prompt says `host.docker.internal:11434` from a
-container, but Ollama is bound to `127.0.0.1` — on Docker Desktop for
-Windows that address arrives on a non-loopback interface, so the worker
-may need the container to use the tailnet IP or Ollama to bind wider.
-Not changed now; it's the worker weekend's problem, not this phase's.
+Ollama in a tool step) waits on the worker's first live run. ~~One thing
+to confirm then: `host.docker.internal:11434` vs Ollama's `127.0.0.1`
+bind~~ — **confirmed fine 2026-09-17**: from inside a container on the
+rig both `http://host.docker.internal:11434/api/tags` and
+`http://100.79.233.8:11434/api/tags` return 200 (Docker Desktop's host
+proxy connects to the host loopback). No change to Ollama's bind or the
+agent prompt needed.
 
-**Next:** the Mac app rebuild (cosmetic — the droplet and the rig are
-done). Then Phase 6 is closed except exit clause 2, and the next real
-piece of work is `worker/`'s first live run (`CLAUDE.md` build order
-stage 2), which is also what unblocks that clause.
+### Stage 2: the worker (prepared 2026-09-17, rig, no spend)
+
+The protocol `worker/src` assumed was wrong, and not by a route rename.
+Checked against the live API docs, the Python SDK's own
+`EnvironmentWorker` source, and a fake-key run from the rig:
+
+- A work item is a **lease on a session** — `GET
+  /v1/environments/{env}/work/poll` → `POST …/work/{id}/ack` → heartbeat
+  every ttl/2 with optimistic concurrency (`412` = lease lost) → `POST
+  …/work/{id}/stop {force:true}` when done. No tool calls in it.
+- The tool calls come from the **session's event stream**: attach to
+  `GET /v1/sessions/{id}/events` (SSE), reconcile against the list
+  endpoint, run each `agent.tool_use` (`bash`/`read`/`write`/`edit`/
+  `glob`/`grep`), post `user.tool_result` events, stop after
+  `session.status_idle` `end_turn` + 60 s idle.
+- Auth is `Authorization: Bearer <environment key>`; the key is
+  `sk-ant-oat01-…`, **generated in the Console only**. The environments
+  API never returns one, so the control plane's "printed once" path is
+  dead; its warn line now says where to get the key.
+
+That is the SDK's session-tool-runner + lease machine (Python/TS/Go), no
+Rust SDK exists, and CLAUDE.md says don't rebuild a sandbox lifecycle.
+So the live path is **`worker/sdk/`** — Anthropic's `EnvironmentWorker`
+in a `nvidia/cuda:12.6.0-runtime` container on the rig (Dockerfile,
+`worker.py`, compose, `env.example`, README with the protocol table and
+runbook). The Rust crate stays in-tree, unbuilt, as reference; delete
+after the SDK worker has served real sessions for a while.
+
+Verified on the rig 2026-09-17 without a key: image builds; `anthropic
+1.6.0` imports the worker; `nvidia-smi` in the container sees the
+`RTX 5070, 616.92, 12227 MiB`; runs as uid 1000; with a fake key the
+worker hits `GET …/work/poll` and fails with `401 authentication_error:
+OAuth access token is invalid` — routing and headers right. Environment
+`rig-gpu` = `env_01Tz2CrQM3X4EWDVLGWLY6GH` already exists on Anthropic's
+side (control-plane sync created it; `workers_polling` will show once
+the worker runs).
+
+**First live run — done 2026-09-17 13:49–13:55 UTC, from the rig:**
+
+1. Console key generated on `rig-gpu` → `worker/sdk/.env`;
+   `docker compose up -d --build` → `idle; polling
+   environment_id=env_01Tz… for work` (`200` on `/work/poll`).
+2. **Stage 2 exit:** `POST /sessions` `{agent_slug: "gpu-compute", task:
+   "Run nvidia-smi …"}` → `sesn_013jsPgwZW8Zsq4AAbZXPh5L`. Worker log:
+   `claimed work` → `ack` → `GET /sessions/{id}` → `events/stream` →
+   `heartbeat expected_last_heartbeat=NO_HEARTBEAT` → `events?limit=1000`
+   → `executing tool tool=bash` (2 s after claim) → `POST …/events`
+   (`user.tool_result`). Agent: "single NVIDIA GeForce RTX 5070 with
+   12227 MiB … about 11086 MiB free". Cost `list_cost 6` ¢.
+3. **Phase 6 exit clause 2:** second message asked it to `curl`
+   `http://host.docker.internal:11434/api/chat` with `qwen3:8b`. Tool
+   step ran 41.7 s (Ollama's log: `POST /api/chat 200 41.63 s` from
+   `127.0.0.1` — Docker Desktop's host proxy), returned `"content":"391"`
+   plus qwen3's `thinking`. Agent reported the breakdown: 17.8 s model
+   load, 15.9 s prompt eval, 7.9 s generating 864 tokens. Session total
+   `list_cost 8` ¢; `/usage` `recent` shows the row (`gpu-compute`,
+   `rig-gpu`, `list_cost_cents: 8`, `budget_reached: false`).
+4. After `end_turn` + 60 s the runner logged `session idle … stopping`,
+   `POST …/work/{id}/stop` 200, back to polling. The work id **is the
+   session id** (`work_id=sesn_…`), not a separate `work_…` — the docs'
+   example is illustrative.
+
+Observed for later: the SDK `bash` tool's 120 s cap would have caught a
+cold Ollama call only ~3× slower than this one; `OLLAMA_KEEP_ALIVE=5m`
+means back-to-back calls are warm, a session that pauses >5 min pays the
+17.8 s load again. Fine for now.
+
+**Next:** stage 5 — `mcp-fleet` gets its pass now that the control-plane
+surface has settled (CLAUDE.md build order). The worker container is
+`restart: unless-stopped` on the rig; it survives reboots as long as
+Docker Desktop starts with Windows.
+
+**Mac app rebuild** is still the one cosmetic leftover from Phase 6.
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):

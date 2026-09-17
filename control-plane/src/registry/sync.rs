@@ -1,10 +1,12 @@
 //! Reconcile `agents/` → Anthropic → SQLite. Idempotent; safe to run on every boot.
 //!
-//! - Environments: created once, `cloud` and `self_hosted` alike. A freshly
-//!   created `self_hosted` environment's `environment_key` is returned to the
-//!   caller in `SyncReport::new_environment_keys` instead of being stored —
-//!   the rig owns that key (CLAUDE.md) — so the caller can surface it exactly
-//!   once and the operator copies it into `RIG_ENVIRONMENT_KEY` on the rig.
+//! - Environments: created once, `cloud` and `self_hosted` alike. If the
+//!   create response for a `self_hosted` environment ever carries an
+//!   `environment_key` it is returned in `SyncReport::new_environment_keys`
+//!   instead of being stored — the rig owns that key (CLAUDE.md). In
+//!   practice the API returns none (confirmed 2026-09-17): environment keys
+//!   are generated in the Console and go straight into `worker/sdk/.env` on
+//!   the rig, so the warn branch below is the one that fires.
 //! - Skills: uploaded if unknown, given a new version if the content hash
 //!   changed, otherwise untouched. Run before agents so their ids can be
 //!   pinned into agent definitions (`resolve_skills`).
@@ -65,8 +67,9 @@ pub async fn sync(reg: &Registry, api: &Client, db: &Db) -> Result<SyncReport> {
                         None => tracing::warn!(
                             slug,
                             id = %env.id,
-                            "self_hosted environment created but the API returned no environment_key; \
-                             the rig cannot authenticate as this environment until one is issued"
+                            "self_hosted environment created; the API does not return an environment_key — \
+                             generate one in the Console (Environments → {slug} → Generate environment key) \
+                             and put it in worker/sdk/.env on the rig"
                         ),
                     }
                 }
