@@ -7,7 +7,8 @@ its first real `gpu-compute` session (nvidia-smi, then Ollama from a tool
 step), 8 ¢ total, in the Usage rollup. **Stage 5 passed** the same day:
 jarvis drove all five `mcp-fleet` tools live, dispatching to the rig;
 `get_session_status` gained `last_reply` so it can relay answers. The
-build order is complete. Remaining cosmetic: the Mac app rebuild.
+build order is complete; the Mac app rebuild followed the same day.
+Nothing is left but real use.
 
 ## Resume here
 
@@ -296,8 +297,8 @@ rig's dedicated `~/.ssh/droplet` key, `Host droplet` in its ssh config):
    `Rig · offline · 503 rig_offline` and the agents/sessions tables keep
    their 5 s cadence throughout (the `updated` clock advanced during the
    outage — `refreshRig` really is outside `refresh()`'s `Promise.all`);
-   `tailscale up` → back to online, no app restart. **The Mac rebuild is
-   still to do** — free disk space first, see the Phase 4 note.
+   `tailscale up` → back to online, no app restart. Mac rebuilt
+   2026-09-17, see "Mac app rebuild" below.
 3. ~~`.gitignore`, delete `docs/phase-6-plan.md`, update `CLAUDE.md`~~ —
    done. `CLAUDE.md` "Open decisions" now carries both tailnet addresses
    and points at `deploy/rig/README.md` plus this section.
@@ -437,10 +438,26 @@ child was already idle, so nothing was re-queued. `/tmp/ev.py` on the
 droplet prints a session's events compactly
 (`curl … /events?limit=100 | python3 /tmp/ev.py 63`).
 
-**Next:** none of the build order is left. What remains is polish —
-the Mac app rebuild, and whatever the fleet's real use turns up.
+**Next:** none of the build order is left. What remains is whatever
+the fleet's real use turns up.
 
-**Mac app rebuild** is still the one cosmetic leftover from Phase 6.
+**Mac app rebuild done 2026-09-17 ~19:10 UTC** (109 GB free, no iCloud
+pressure): `npm run tauri build -- --bundles app` in `app/`, 1m31s,
+bundle copied over `/Applications/J.A.R.V.I.S..app` (binary 10.0 MB,
+`strings` shows `get_inference_models` / `/inference/models`). Launched
+clean. Not smoke-tested against the droplet — the Mac was on the
+FortiGuard-filtered network (403 block page on `/healthz`); on the
+hotspot the Fleet tab should show `Rig · online · nomic-embed-text:latest,
+qwen3:8b` above the agents table.
+
+Gotcha: the first build failed with `failed to read plugin permissions:
+… /Users/jameswalker/Documents/Iron Fleet/target.nosync/release/build/
+tauri-…/out/permissions/…: No such file or directory`. The Mac's
+`target.nosync/` was carried over from the old `~/Documents` checkout and
+tauri's cached build-script output still held the old absolute path.
+Fix: `rm -rf target.nosync/release/build/{tauri,app}-*
+target.nosync/release/.fingerprint/{tauri,app}-*`, then rebuild. Any
+checkout that moves needs the same.
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
