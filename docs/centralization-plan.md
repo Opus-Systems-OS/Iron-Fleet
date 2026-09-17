@@ -1,13 +1,11 @@
 # Centralizing on the droplet — plan
 
-**Status (2026-09-17):** Phases 0–5 done — the droplet is the only
-deployment. Phase 6 (local inference on the rig) is **live and closed**
-except exit clause 2: PR #12 + PR #13 deployed, rig and droplet on one
-tailnet, exit checks 1 and 3 met, the app's rig line verified online and
-offline on Windows. Exit clause 2 (a `gpu-compute` session calling Ollama
-in a tool step) waits on the worker's first live run — which is now
-**build-order stage 2, prepared and one Console key away** (see "Stage 2:
-the worker" below). Remaining cosmetic: the Mac app rebuild.
+**Status (2026-09-17):** Phases 0–6 done — the droplet is the only
+deployment, and **Phase 6 is closed**: all three exit clauses met. Build
+order **stage 2 (the worker) is live**: `worker/sdk/` on the rig served
+its first real `gpu-compute` session (nvidia-smi, then Ollama from a tool
+step), 8 ¢ total, in the Usage rollup. Next real work: stage 5,
+`mcp-fleet`. Remaining cosmetic: the Mac app rebuild.
 
 ## Resume here
 
@@ -348,28 +346,40 @@ OAuth access token is invalid` — routing and headers right. Environment
 side (control-plane sync created it; `workers_polling` will show once
 the worker runs).
 
-**Next (needs you, ~30 min, small spend):**
+**First live run — done 2026-09-17 13:49–13:55 UTC, from the rig:**
 
-1. Console → Environments → rig-gpu → Generate environment key →
-   `worker/sdk/.env` on the rig (copy `env.example`). Never anywhere else.
-2. `cd worker\sdk; docker compose up -d --build; docker compose logs -f`
-   → `idle; polling environment_id=env_01Tz… for work`.
-3. From the droplet (account key, not the rig): `GET
-   /v1/environments/env_01Tz…/work/stats` → `workers_polling: 1`.
-4. Stage 2 exit: `POST /sessions` `{agent_slug: "gpu-compute", task:
-   "run nvidia-smi and tell me the GPU"}` via `fleet.opustower.dev`;
-   worker log shows claim → `executing tool tool=bash` → result; the
-   app's session view shows it. `gpu-compute` cap is `"500"` — a
-   two-turn session is cents.
-5. Phase 6 exit clause 2: `POST /sessions/{id}/events` `{task: "call
-   http://host.docker.internal:11434/api/chat with qwen3:8b and
-   summarise the reply"}`. Record the evidence here and close Phase 6.
-6. Then stage 5: `mcp-fleet` gets its pass once the surface has settled.
+1. Console key generated on `rig-gpu` → `worker/sdk/.env`;
+   `docker compose up -d --build` → `idle; polling
+   environment_id=env_01Tz… for work` (`200` on `/work/poll`).
+2. **Stage 2 exit:** `POST /sessions` `{agent_slug: "gpu-compute", task:
+   "Run nvidia-smi …"}` → `sesn_013jsPgwZW8Zsq4AAbZXPh5L`. Worker log:
+   `claimed work` → `ack` → `GET /sessions/{id}` → `events/stream` →
+   `heartbeat expected_last_heartbeat=NO_HEARTBEAT` → `events?limit=1000`
+   → `executing tool tool=bash` (2 s after claim) → `POST …/events`
+   (`user.tool_result`). Agent: "single NVIDIA GeForce RTX 5070 with
+   12227 MiB … about 11086 MiB free". Cost `list_cost 6` ¢.
+3. **Phase 6 exit clause 2:** second message asked it to `curl`
+   `http://host.docker.internal:11434/api/chat` with `qwen3:8b`. Tool
+   step ran 41.7 s (Ollama's log: `POST /api/chat 200 41.63 s` from
+   `127.0.0.1` — Docker Desktop's host proxy), returned `"content":"391"`
+   plus qwen3's `thinking`. Agent reported the breakdown: 17.8 s model
+   load, 15.9 s prompt eval, 7.9 s generating 864 tokens. Session total
+   `list_cost 8` ¢; `/usage` `recent` shows the row (`gpu-compute`,
+   `rig-gpu`, `list_cost_cents: 8`, `budget_reached: false`).
+4. After `end_turn` + 60 s the runner logged `session idle … stopping`,
+   `POST …/work/{id}/stop` 200, back to polling. The work id **is the
+   session id** (`work_id=sesn_…`), not a separate `work_…` — the docs'
+   example is illustrative.
 
-Watch on the first run: the SDK `bash` tool's 120 s per-call timeout
-(long CUDA jobs must background and poll), 12 GB shared with Ollama,
-and whether the session's `console_url` shows the self-hosted tool
-results as expected.
+Observed for later: the SDK `bash` tool's 120 s cap would have caught a
+cold Ollama call only ~3× slower than this one; `OLLAMA_KEEP_ALIVE=5m`
+means back-to-back calls are warm, a session that pauses >5 min pays the
+17.8 s load again. Fine for now.
+
+**Next:** stage 5 — `mcp-fleet` gets its pass now that the control-plane
+surface has settled (CLAUDE.md build order). The worker container is
+`restart: unless-stopped` on the rig; it survives reboots as long as
+Docker Desktop starts with Windows.
 
 **Mac app rebuild** is still the one cosmetic leftover from Phase 6.
 

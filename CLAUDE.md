@@ -111,10 +111,9 @@ Do not start a stage before the one above it works end to end.
 
 1. `control-plane/` — start a session from `curl`, receive a webhook back. No UI.
 2. `worker/` — `rig-gpu` running a throwaway agent against the 5070. Most likely
-   to eat a weekend; do it before any UI depends on it. **Prepared
-   2026-09-17** (`worker/sdk/`, protocol confirmed, image built on the rig);
-   the first live run needs a Console-generated environment key — runbook
-   in `worker/sdk/README.md`.
+   to eat a weekend; do it before any UI depends on it. **Live 2026-09-17**
+   (`worker/sdk/` on the rig; first session served, 8 ¢). Runbook and
+   evidence in `worker/sdk/README.md`.
 3. `app/` — Tauri shell, Fleet Dashboard, read-only.
 4. Session controls, then the Usage tab.
 5. `mcp-fleet/` — last, once the surface it wraps has stopped moving.
@@ -133,7 +132,7 @@ Do not start a stage before the one above it works end to end.
   and Railway deleted 2026-09-15; the droplet is the only deployment.
   Droplet secrets live in `.env` on the box (`chmod 600`), never in this
   repo.
-- **Local inference (Phase 6, decided 2026-09-16, live):** Ollama on the
+- **Local inference (Phase 6, decided 2026-09-16, live, closed 2026-09-17):** Ollama on the
   rig, reached from the droplet over **Tailscale** (rig keeps Ollama on
   `127.0.0.1`, publishes it with `tailscale serve --tcp=11434`; control-plane
   proxies to `INFERENCE_URL`, unset = routes 404). Tailnet: rig `opus` =

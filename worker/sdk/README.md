@@ -82,26 +82,25 @@ Stop with `docker compose down` (sends SIGTERM, waits up to 40 s).
   authentication_error: OAuth access token is invalid`, exits. Routing,
   beta header (`managed-agents-2026-04-01`) and worker id header confirmed.
 
-## Not yet done — needs the key (first live run)
+## First live run — done 2026-09-17
 
-1. Console → Environments → **rig-gpu** (`env_01Tz2CrQM3X4EWDVLGWLY6GH`) →
-   Generate environment key → `worker/sdk/.env`.
-2. `docker compose up -d --build`; logs show `idle; polling`.
-   `ant beta:environments:work stats` (or `GET …/work/stats` with the
-   account key, from the droplet, not the rig) should show
-   `workers_polling: 1`.
-3. Start a throwaway `gpu-compute` session through the control plane
-   (`POST /sessions` `{agent_slug: "gpu-compute", task: "run nvidia-smi
-   and tell me the GPU"}` — `rig-gpu` is the agent's default environment).
-   Watch the worker log: claim → `executing tool tool=bash` → result posted;
-   the app's session view shows the tool result. That is stage 2's exit.
-4. Phase 6 exit clause 2: `POST /sessions/{id}/events` `{task: "call
-   http://host.docker.internal:11434/api/chat with qwen3:8b and summarise
-   the reply"}` — the tool step reaches Ollama from the container (already
-   proven reachable above). Record both in `docs/centralization-plan.md`.
-5. Things to watch on that run: the `bash` tool's 120 s per-call timeout
-   (CUDA jobs longer than that must background themselves and poll), and
-   the 5070's 12 GB shared with Ollama (`OLLAMA_KEEP_ALIVE=5m`).
+Key generated in the Console on rig-gpu, `docker compose up -d --build`,
+`idle; polling` with `200` on `/work/poll`. Then, through the control
+plane (`fleet.opustower.dev`):
+
+- `POST /sessions` `{agent_slug: "gpu-compute", task: "Run nvidia-smi
+  …"}` → claim → ack → stream → heartbeat → `executing tool tool=bash`
+  → result posted, ~2 s from claim to tool. Agent answered with the
+  5070's free VRAM. **Stage 2 exit.**
+- `POST /sessions/{id}/events` asking it to `curl`
+  `host.docker.internal:11434/api/chat` on `qwen3:8b` → 41.7 s tool
+  step (17.8 s model load + 15.9 s prompt eval + 7.9 s generation),
+  `"content":"391"`. **Phase 6 exit clause 2.**
+- Session total 8 ¢, visible in `/usage`. After `end_turn` + 60 s the
+  runner stopped the work item and went back to polling.
+- Note: the work id is the session id (`work_id=sesn_…`).
+
+Evidence and log excerpts in `docs/centralization-plan.md` "Stage 2".
 
 ## Not in scope
 
