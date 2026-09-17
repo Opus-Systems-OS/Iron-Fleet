@@ -129,14 +129,17 @@ Do not start a stage before the one above it works end to end.
   and Railway deleted 2026-09-15; the droplet is the only deployment.
   Droplet secrets live in `.env` on the box (`chmod 600`), never in this
   repo.
-- **Local inference (Phase 6, decided 2026-09-16):** Ollama on the rig,
-  reached from the droplet over **Tailscale** (rig keeps Ollama on
+- **Local inference (Phase 6, decided 2026-09-16, live):** Ollama on the
+  rig, reached from the droplet over **Tailscale** (rig keeps Ollama on
   `127.0.0.1`, publishes it with `tailscale serve --tcp=11434`; control-plane
-  proxies to `INFERENCE_URL=http://<rig tailnet IP>:11434`, unset = routes
-  404). Models `qwen3:8b` + `nomic-embed-text` in `deploy/rig/models.txt`;
+  proxies to `INFERENCE_URL`, unset = routes 404). Tailnet: rig `opus` =
+  `100.79.233.8`, droplet `opustower` = `100.108.133.31`, so
+  `INFERENCE_URL=http://100.79.233.8:11434`. Models `qwen3:8b` +
+  `nomic-embed-text` in `deploy/rig/models.txt`;
   `OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_KEEP_ALIVE=5m`. App shows only a
   rig online/offline line with model tags. Rig off → `503`, never Claude.
-  Full plan in `docs/phase-6-plan.md`.
+  Runbook `deploy/rig/README.md`; outcome and evidence in
+  `docs/centralization-plan.md` "Resume here".
 - Multi-agent orchestration, memory stores, and outcomes are beta on the
   Managed Agents side. Keep the control plane able to fall back to direct
   Messages API calls for anything where beta instability would actually hurt.
