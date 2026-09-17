@@ -1,0 +1,5 @@
+# Files that get COPYed into Linux images or piped to Linux hosts must stay LF
+# on a Windows checkout (core.autocrlf would otherwise give them CRLF).
+worker/sdk/** text eol=lf
+deploy/droplet/*.sh text eol=lf
+deploy/droplet/Caddyfile text eol=lf
