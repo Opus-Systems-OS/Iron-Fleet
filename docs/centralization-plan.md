@@ -417,17 +417,24 @@ tools; `mcp-fleet` gained its first tests, one of which fails if the
 router ever grows past five.
 
 PR #16 merged and deployed 2026-09-17 ~15:20 UTC (`af03677` on both
-containers, healthz 200). **One verification left, doable from the Mac
-(the rig only needs to keep its worker container running):** send jarvis
-session `sesn_0129niKcavFbza85pJBjLv5G` a message like "check on the
-gpu-compute session and tell me exactly what it last said", via
-`POST https://fleet.opustower.dev/sessions/sesn_0129niKcavFbza85pJBjLv5G/events`
-`{task: …}` with the `CONTROL_PLANE_TOKEN` from the droplet's `.env`
-(`ssh root@198.199.66.109`). Expect an `agent.mcp_tool_use
-get_session_status` whose result is the compact view with `last_reply:
-"The NVIDIA driver version is 616.92 (on the RTX 5070)."` and jarvis
-quoting it. Record the event ids here; that closes stage 5. `/tmp/ev.py`
-on the droplet prints a session's events compactly
+containers, healthz 200).
+
+**Verified from the Mac 2026-09-17 19:03 UTC — stage 5 closed.** Sent
+`sesn_0129niKcavFbza85pJBjLv5G` "Check on the gpu-compute session you
+started earlier and tell me exactly what it last said, word for word"
+(`sevt_01DVkgDcv4StAdZDpZSuk9XT`, curl run on the droplet with its
+`CONTROL_PLANE_TOKEN`). Jarvis called `get_session_status
+{session_id: sesn_014mScwJSHMwi4xXjX26RGEs}` (`sevt_01Nc5qxQkh2pxHjuccAoRWr4`);
+the result (`sevt_01AKHzhyPXDidmVtvAmyKC1c`) was the compact view —
+`status: idle`, `environment: rig-gpu`, `spent_cents: "6"`,
+`cap_cents: "500"`, `active_seconds: 11.902`, `last_reply: "The NVIDIA
+driver version is 616.92 (on the RTX 5070)."` — and jarvis's reply
+(`sevt_01LfuQV6ibx76k5VaVSsmE3R`) quoted it verbatim, adding that the
+`sleep 100` turn never produced a reply because the interrupt caught it
+first. Turn ended `end_turn` (`sevt_012pqHtwL8DcUjCg1hiPwWcm`); the jarvis
+session now stands at 29 ¢ of its 50 ¢ cap. No rig involvement — the
+child was already idle, so nothing was re-queued. `/tmp/ev.py` on the
+droplet prints a session's events compactly
 (`curl … /events?limit=100 | python3 /tmp/ev.py 63`).
 
 **Next:** none of the build order is left. What remains is polish —
