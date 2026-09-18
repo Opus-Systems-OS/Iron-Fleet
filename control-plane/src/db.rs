@@ -70,7 +70,10 @@ CREATE TABLE IF NOT EXISTS session_usage (
   active_seconds    REAL,
   budget_reached    INTEGER NOT NULL DEFAULT 0,
   last_event_type   TEXT,
-  observed_at       TEXT NOT NULL
+  observed_at       TEXT NOT NULL,
+  -- "<type>: <message>" of the session.error the session ended on, NULL when
+  -- it ended on a reply. Added after the table shipped: see `migrate`.
+  last_error        TEXT
 );
 -- Singleton: the one vault holding the mcp-fleet static_bearer credential,
 -- provisioned once (unlike agents/environments, vault creation has no
@@ -122,6 +125,7 @@ pub struct UsageRow {
     pub budget_reached: bool,
     pub last_event_type: String,
     pub observed_at: String,
+    pub last_error: Option<String>,
 }
 
 /// Half-open `[since, until)` window over `session_usage.observed_at`.
@@ -179,6 +183,7 @@ pub struct UsageSnapshot {
     pub active_seconds: Option<f64>,
     pub budget_reached: bool,
     pub last_event_type: String,
+    pub last_error: Option<String>,
 }
 
 impl Db {
@@ -196,6 +201,7 @@ impl Db {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Db {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -206,6 +212,7 @@ impl Db {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Db {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -467,8 +474,8 @@ impl Db {
             c.execute(
                 "INSERT INTO session_usage (session_id, agent_slug, environment_slug, list_cost_cents,
                                             input_tokens, output_tokens, active_seconds,
-                                            budget_reached, last_event_type, observed_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                                            budget_reached, last_event_type, observed_at, last_error)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT(session_id) DO UPDATE SET
                    agent_slug = excluded.agent_slug,
                    environment_slug = COALESCE(excluded.environment_slug, session_usage.environment_slug),
@@ -478,7 +485,8 @@ impl Db {
                    active_seconds = COALESCE(excluded.active_seconds, session_usage.active_seconds),
                    budget_reached = MAX(excluded.budget_reached, session_usage.budget_reached),
                    last_event_type = excluded.last_event_type,
-                   observed_at = excluded.observed_at",
+                   observed_at = excluded.observed_at,
+                   last_error = excluded.last_error",
                 params![
                     s.session_id,
                     s.agent_slug,
@@ -490,6 +498,7 @@ impl Db {
                     s.budget_reached as i64,
                     s.last_event_type,
                     now(),
+                    s.last_error,
                 ],
             )?;
             Ok(())
@@ -514,7 +523,8 @@ impl Db {
         self.with(|c| {
             let mut stmt = c.prepare(&format!(
                 "SELECT session_id, agent_slug, environment_slug, list_cost_cents, input_tokens,
-                        output_tokens, active_seconds, budget_reached, last_event_type, observed_at
+                        output_tokens, active_seconds, budget_reached, last_event_type, observed_at,
+                        last_error
                  FROM session_usage {USAGE_WINDOW} ORDER BY {order_by} LIMIT ?3"
             ))?;
             let rows =
@@ -646,7 +656,26 @@ fn read_usage_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<UsageRow> {
         budget_reached: r.get::<_, i64>(7)? != 0,
         last_event_type: r.get(8)?,
         observed_at: r.get(9)?,
+        last_error: r.get(10)?,
     })
+}
+
+/// Columns added after a table first shipped. `CREATE TABLE IF NOT EXISTS`
+/// leaves an existing table alone, so each addition is an `ALTER` guarded by
+/// `PRAGMA table_info` — idempotent, and a no-op on a fresh database where
+/// `SCHEMA` already has the column.
+fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    const ADDED: &[(&str, &str, &str)] = &[("session_usage", "last_error", "TEXT")];
+    for (table, column, ty) in ADDED {
+        let present = conn
+            .prepare(&format!("PRAGMA table_info({table})"))?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .any(|name| name.as_deref() == Ok(column));
+        if !present {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {ty}"))?;
+        }
+    }
+    Ok(())
 }
 
 pub fn now() -> String {
@@ -713,6 +742,7 @@ mod tests {
             active_seconds: Some(4.5),
             budget_reached: reached,
             last_event_type: event.into(),
+            last_error: None,
         };
         db.upsert_usage(&snap("session.budget_reached", true))
             .unwrap();
@@ -737,6 +767,7 @@ mod tests {
             active_seconds: Some(1.5),
             budget_reached: reached,
             last_event_type: "session.status_idled".into(),
+            last_error: None,
         };
         db.upsert_usage(&snap("sesn_1", "jarvis", "5", false))
             .unwrap();
@@ -785,6 +816,7 @@ mod tests {
             active_seconds: None,
             budget_reached: false,
             last_event_type: "session.status_idled".into(),
+            last_error: None,
         };
         for s in ["sesn_a", "sesn_b", "sesn_c"] {
             db.upsert_usage(&snap(s)).unwrap();
@@ -935,5 +967,64 @@ mod tests {
         db.set_mcp_fleet_vault("vlt_2", "vcrd_2", "https://mcp-fleet.example/mcp")
             .unwrap();
         assert_eq!(db.mcp_fleet_vault().unwrap().unwrap().vault_id, "vlt_2");
+    }
+    #[test]
+    fn last_error_round_trips_and_clears_on_a_clean_idle() {
+        let db = Db::in_memory().unwrap();
+        let snap = |err: Option<&str>| UsageSnapshot {
+            session_id: "sesn_1".into(),
+            agent_slug: "blueweb-client".into(),
+            environment_slug: None,
+            list_cost_cents: Some("993".parse().unwrap()),
+            input_tokens: None,
+            output_tokens: None,
+            active_seconds: None,
+            budget_reached: false,
+            last_event_type: "session.status_idled".into(),
+            last_error: err.map(str::to_owned),
+        };
+        db.upsert_usage(&snap(Some("billing_error: credit balance is too low")))
+            .unwrap();
+        let rows = db
+            .usage_rows(&UsageWindow::default(), UsageOrder::Newest, None)
+            .unwrap();
+        assert_eq!(
+            rows[0].last_error.as_deref(),
+            Some("billing_error: credit balance is too low")
+        );
+        // The next idle ended on a reply: the error is gone, not sticky.
+        db.upsert_usage(&snap(None)).unwrap();
+        let rows = db
+            .usage_rows(&UsageWindow::default(), UsageOrder::Newest, None)
+            .unwrap();
+        assert_eq!(rows[0].last_error, None);
+    }
+
+    #[test]
+    fn migrate_adds_last_error_to_a_pre_existing_table() {
+        // The droplet's database was created before `last_error` existed:
+        // `CREATE TABLE IF NOT EXISTS` won't touch it, `migrate` must.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session_usage (
+               session_id TEXT PRIMARY KEY, agent_slug TEXT NOT NULL, environment_slug TEXT,
+               list_cost_cents TEXT, input_tokens INTEGER, output_tokens INTEGER,
+               active_seconds REAL, budget_reached INTEGER NOT NULL DEFAULT 0,
+               last_event_type TEXT, observed_at TEXT NOT NULL);
+             INSERT INTO session_usage (session_id, agent_slug, observed_at)
+               VALUES ('sesn_old', 'jarvis', '2026-09-15T00:00:00Z');",
+        )
+        .unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap(); // idempotent
+        let err: Option<String> = conn
+            .query_row(
+                "SELECT last_error FROM session_usage WHERE session_id = 'sesn_old'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(err, None, "existing rows survive with a NULL last_error");
     }
 }
