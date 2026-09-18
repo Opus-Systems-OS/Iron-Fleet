@@ -878,7 +878,9 @@ mod tests {
         ];
         assert!(check_credentials(std::slice::from_ref(&bearer), &servers).is_ok());
 
-        assert!(is_github_repo_url("https://github.com/Opus-Systems-OS/Iron-Fleet"));
+        assert!(is_github_repo_url(
+            "https://github.com/Opus-Systems-OS/Iron-Fleet"
+        ));
         for bad in [
             "https://github.com/Opus-Systems-OS/Iron-Fleet.git",
             "https://github.com/Opus-Systems-OS",
