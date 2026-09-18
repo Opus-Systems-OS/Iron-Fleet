@@ -571,13 +571,18 @@ native Swift app, separate). Old `Opus1247/…` URLs 301-redirect for git
 and web, so nothing broke on the spot; the one thing that *had* to change
 is GHCR — an org repo's Actions token cannot push to a user namespace —
 so images now build to `ghcr.io/opus-systems-os/iron-fleet/…`, the
-droplet compose pulls from there, and **the two new packages must be set
-public in the GitHub UI** (org → Packages → each → Package settings →
-Danger zone → Change visibility) before `deploy.sh` can pull them
-unauthenticated. `agents/blueweb-client.json`'s mount and the tests were
-repointed (rolls `blueweb-client` one version). Remotes to update by hand:
-the rig's checkout and `/opt/iron-fleet` on the droplet (done from the
-Mac for the droplet).
+droplet compose pulls from there. The org's package settings had public
+package creation **off** by default ("disabled by org administrators" on
+the visibility toggle) — enabled under org Settings → Packages → Package
+creation → Public, then each package set public; both pull anonymously
+now (`ghcr.io/v2/…/manifests/latest` → 200). Deployed `42b106d` from the
+org namespace 2026-09-18 ~03:00 UTC, both `/healthz` 200, old-namespace
+images removed from the box. `agents/blueweb-client.json`'s mount and the
+tests were repointed (no agent roll: the mount is control-plane-side).
+`/opt/iron-fleet`'s remote is updated; **the rig's checkout remote is
+not yet** (the redirect covers it until someone runs
+`git remote set-url origin https://github.com/Opus-Systems-OS/Iron-Fleet.git`
+there).
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
