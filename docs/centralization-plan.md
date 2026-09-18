@@ -584,14 +584,18 @@ not yet** (the redirect covers it until someone runs
 `git remote set-url origin https://github.com/Opus-Systems-OS/Iron-Fleet.git`
 there).
 
-**Opus Systems OS API — stages 1 and 2 live 2026-09-18 (~03:54 and ~04:17 UTC).** Its own
+**Opus Systems OS API — stages 1–3, 5a, 5b live 2026-09-18; stage 4's Windows half parked in the rig backlog.** Its own
 repo, `Opus-Systems-OS/Opus-Systems-OS-API` (Rust/axum gateway; plan,
 contract and "resume here" in that repo's `CLAUDE.md`, `docs/api-design.md`,
 `docs/status.md`). Runs on this droplet as the `api` compose service
 (PR #27) at `https://api.opustower.dev`, holding only `CONTROL_PLANE_TOKEN`
 and its own keys DB (`droplet_api_data`, in the nightly bundle). Stage 2 put every control-plane route behind it
-(fleet, rig, sessions incl. SSE, usage, inference), verified with a jarvis
-session driven end to end through `api.opustower.dev`. It is the
+(fleet, rig, sessions incl. SSE, usage, inference); stage 3 added the
+WebSocket channel for headsets, rate limits and CORS; 5a the C# SDK; 5b
+moved the native Jarvis Swift app onto it — which is why the control plane
+gained session-local custom tools + `system_suffix` (`agent_with_overrides`,
+#33) and `POST /sessions/{id}/tool-results`. The Mac desktop app is on the
+API with a device key (#30). It is the
 front door for every client from here on; `fleet.opustower.dev` stays
 client-facing until the API's stage 4, after which Caddy will expose only
 the webhook there. Gotcha: the Caddyfile is a single-file bind mount —
