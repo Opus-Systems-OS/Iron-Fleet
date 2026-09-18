@@ -584,12 +584,14 @@ not yet** (the redirect covers it until someone runs
 `git remote set-url origin https://github.com/Opus-Systems-OS/Iron-Fleet.git`
 there).
 
-**Opus Systems OS API — stage 1 live 2026-09-18 ~03:54 UTC.** Its own
+**Opus Systems OS API — stages 1 and 2 live 2026-09-18 (~03:54 and ~04:17 UTC).** Its own
 repo, `Opus-Systems-OS/Opus-Systems-OS-API` (Rust/axum gateway; plan,
 contract and "resume here" in that repo's `CLAUDE.md`, `docs/api-design.md`,
 `docs/status.md`). Runs on this droplet as the `api` compose service
 (PR #27) at `https://api.opustower.dev`, holding only `CONTROL_PLANE_TOKEN`
-and its own keys DB (`droplet_api_data`, in the nightly bundle). It is the
+and its own keys DB (`droplet_api_data`, in the nightly bundle). Stage 2 put every control-plane route behind it
+(fleet, rig, sessions incl. SSE, usage, inference), verified with a jarvis
+session driven end to end through `api.opustower.dev`. It is the
 front door for every client from here on; `fleet.opustower.dev` stays
 client-facing until the API's stage 4, after which Caddy will expose only
 the webhook there. Gotcha: the Caddyfile is a single-file bind mount —
