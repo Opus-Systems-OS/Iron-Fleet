@@ -75,17 +75,20 @@ state itself is never cached here (CLAUDE.md: "clients hold no fleet state").
 
 ## Local run
 
-Against the real, deployed control plane:
+Against the real, deployed API (the app talks to the Opus Systems OS API,
+never to the control plane directly, since 2026-09-18):
 
 ```sh
 cd app
 npm install
-CONTROL_PLANE_URL=https://fleet.opustower.dev \
-  CONTROL_PLANE_TOKEN=<the deployed CONTROL_PLANE_TOKEN> \
+CONTROL_PLANE_URL=https://api.opustower.dev/v1 \
+  CONTROL_PLANE_TOKEN=<a per-device API key, osk_…> \
   npm run tauri dev
 ```
 
-Or leave the env vars unset and use the in-app connection form.
+The env var names are historical: the URL is the API base *including*
+`/v1`, the token is an `osk_…` key minted with `opus-api keys create` on
+the droplet. Or leave the env vars unset and use the in-app connection form.
 
 Against a fully local stack, no spend, following `control-plane/README.md`'s
 local-run recipe:
