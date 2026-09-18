@@ -23,7 +23,7 @@
   ],
   "github": {
     "token_env": "BLUEWEB_GITHUB_TOKEN",
-    "mount": ["https://github.com/Opus1247/Iron-Fleet"]
+    "mount": ["https://github.com/Opus-Systems-OS/Iron-Fleet"]
   },
   "agent": {
     "name": "BlueWeb Client",

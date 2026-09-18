@@ -58,7 +58,7 @@ echo "ufw: $(ufw status | head -1)"
 
 # --- checkout --------------------------------------------------------------
 if [[ ! -d /opt/iron-fleet/.git ]]; then
-  git clone -q https://github.com/Opus1247/Iron-Fleet /opt/iron-fleet
+  git clone -q https://github.com/Opus-Systems-OS/Iron-Fleet /opt/iron-fleet
   echo "repo: cloned to /opt/iron-fleet"
 else
   echo "repo: /opt/iron-fleet already present"
