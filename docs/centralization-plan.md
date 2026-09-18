@@ -599,6 +599,35 @@ the webhook there. Gotcha: the Caddyfile is a single-file bind mount —
 unchanged" — after any Caddyfile change run
 `docker compose up -d --force-recreate caddy`.
 
+**Rig backlog — do these next time at the Windows rig** (parked
+2026-09-18; nothing here blocks Mac-side work, and the shared control-plane
+token keeps the Windows app working until then):
+
+1. Docker Desktop → Settings → General → "Start Docker Desktop when you
+   sign in" (the `rig-gpu` worker container needs it to survive a reboot).
+2. In the rig's Iron-Fleet checkout:
+   `git remote set-url origin https://github.com/Opus-Systems-OS/Iron-Fleet.git`,
+   then `git pull`.
+3. Mint the rig's API key from the Mac:
+   `ssh root@198.199.66.109 "cd /opt/iron-fleet/deploy/droplet && docker compose exec -T api opus-api keys create --name win-rig --scopes fleet:read,sessions:read,sessions:write,usage:read,inference"`
+   and put it, with `url` `https://api.opustower.dev/v1`, in
+   `%APPDATA%\com.ironfleet.app\control-plane.json`. Rebuild the app
+   (`npm run tauri build -- --no-bundle`, binary in
+   `target.nosync\release\app.exe`). Fleet tab should show the four agents
+   and the Rig line.
+4. Only then narrow Caddy: `fleet.opustower.dev` serves `/webhooks/*` and
+   `/healthz` only (everything else 404), and the shared
+   `CONTROL_PLANE_TOKEN` stops being on any laptop. That closes the API's
+   stage 4.
+
+**API stage 4, Mac half — done 2026-09-18 ~05:05 UTC** (PR #30): the app
+talks to `https://api.opustower.dev/v1` with a per-device key; two routes
+changed shape (`/agents` → `/fleet/agents` `{data}`, `/inference/models` →
+`/rig`). Mac rebuilt and repointed (`control-plane.json` `url` + `osk_`
+key; the old file is beside it as `.control-plane.bak`); Caddy's
+`access-api.log` shows the app polling `/v1/fleet/agents`, `/v1/rig`,
+`/v1/sessions` → 200.
+
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
 
