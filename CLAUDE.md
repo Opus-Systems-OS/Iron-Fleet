@@ -76,6 +76,11 @@ control plane, like every other agent, so its spend appears in the Usage tab.
 
 macOS speech I/O is platform-gated in `src-tauri`. Windows is text-only for now.
 
+The separate native Jarvis app (`Opus-Systems-OS/Jarvis`, Swift) is also a
+fleet client since 2026-09-18: its conversations are `jarvis` sessions via
+the Opus Systems OS API, with its Apple Music tools declared per session
+(never on the agent) and executed on the device.
+
 ## Layout
 
 ```
