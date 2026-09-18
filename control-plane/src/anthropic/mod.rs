@@ -138,6 +138,13 @@ impl Client {
         self.send(Method::POST, "/v1/agents", &[], Some(def)).await
     }
 
+    /// The agent as Anthropic holds it — `tools` and `system` included — for
+    /// building a session's `agent_with_overrides` on top of the real list.
+    pub async fn get_agent_raw(&self, id: &str) -> Result<Value> {
+        self.send::<Value>(Method::GET, &format!("/v1/agents/{id}"), &[], None::<&()>)
+            .await
+    }
+
     /// Full-body update with no `version`: declarative apply, last write wins.
     pub async fn update_agent(&self, id: &str, def: &AgentDefinition) -> Result<Agent> {
         self.send(Method::POST, &format!("/v1/agents/{id}"), &[], Some(def))

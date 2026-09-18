@@ -163,13 +163,21 @@ impl Budget {
     }
 }
 
-/// Pinned agent reference for session create.
+/// Agent reference for session create: pinned, or pinned with session-local
+/// overrides (docs: managed-agents/sessions, "Override agent configuration
+/// for a session"). An override *replaces* the agent's field in full and
+/// never touches the agent resource — so `tools` here is always the agent's
+/// own list plus whatever the caller added, assembled by `sessions::create`.
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentRef {
     #[serde(rename = "type")]
-    pub kind: &'static str, // always "agent"
+    pub kind: &'static str, // "agent" or "agent_with_overrides"
     pub id: String,
     pub version: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
 }
 
 impl AgentRef {
@@ -178,8 +186,38 @@ impl AgentRef {
             kind: "agent",
             id: id.into(),
             version,
+            tools: None,
+            system: None,
         }
     }
+
+    pub fn with_overrides(
+        id: impl Into<String>,
+        version: u32,
+        tools: Option<Vec<Value>>,
+        system: Option<String>,
+    ) -> Self {
+        AgentRef {
+            kind: "agent_with_overrides",
+            id: id.into(),
+            version,
+            tools,
+            system,
+        }
+    }
+}
+
+/// A client-executed tool declared on one session (docs:
+/// managed-agents/tools, "Custom tools"). The session emits
+/// `agent.custom_tool_use` and waits (`requires_action`) for a
+/// `user.custom_tool_result`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomTool {
+    #[serde(rename = "type")]
+    pub kind: String, // must be "custom"
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -201,6 +239,15 @@ pub enum SessionEvent {
     Message { content: Vec<TextBlock> },
     #[serde(rename = "user.interrupt")]
     Interrupt,
+    /// The result of a client-executed custom tool, answering an
+    /// `agent.custom_tool_use` event by its id.
+    #[serde(rename = "user.custom_tool_result")]
+    CustomToolResult {
+        custom_tool_use_id: String,
+        content: Vec<TextBlock>,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        is_error: bool,
+    },
 }
 
 impl SessionEvent {
@@ -210,6 +257,21 @@ impl SessionEvent {
                 kind: "text",
                 text: text.into(),
             }],
+        }
+    }
+
+    pub fn custom_tool_result(
+        custom_tool_use_id: impl Into<String>,
+        text: impl Into<String>,
+        is_error: bool,
+    ) -> Self {
+        SessionEvent::CustomToolResult {
+            custom_tool_use_id: custom_tool_use_id.into(),
+            content: vec![TextBlock {
+                kind: "text",
+                text: text.into(),
+            }],
+            is_error,
         }
     }
 }
