@@ -8,7 +8,8 @@ step), 8 ¢ total, in the Usage rollup. **Stage 5 passed** the same day:
 jarvis drove all five `mcp-fleet` tools live, dispatching to the rig;
 `get_session_status` gained `last_reply` so it can relay answers. The
 build order is complete; the Mac app rebuild followed the same day.
-Nothing is left but real use.
+First real-shaped job (2026-09-18) worked but cost $9.93 — see
+"First real-shaped job" in Resume here for the four findings.
 
 ## Resume here
 
@@ -460,6 +461,59 @@ tauri's cached build-script output still held the old absolute path.
 Fix: `rm -rf target.nosync/release/build/{tauri,app}-*
 target.nosync/release/.fingerprint/{tauri,app}-*`, then rebuild. Any
 checkout that moves needs the same.
+
+### First real-shaped job: Josh's Tires demo site (2026-09-18)
+
+`blueweb-client` driven end to end from the Mac with the
+`blueweb-customer-site` skill, `sesn_015fmiDkNnF9XckJxn1tgZrU` on
+`blueweb-web`: demo intake in the task, scaffold, `business.js`,
+component tweaks, Playwright check at 390 px and desktop, private repo
+**`BlueWeb-Org/joshs-tires`** created, 26 files pushed with `push_files`
+and verified byte-identical by blob SHA, CI green on `22dff38`. No domain,
+no Cloudflare; served locally with `astro preview`. The tech works.
+**$9.93 of the $10.00 cap**, 50 model requests, 151 K output tokens,
+4.8 M cache-read tokens, 31 min active.
+
+The run was interrupted twice by `session.error` `billing_error` ("credit
+balance is too low"), each ending the turn as `status_idle
+retries_exhausted`; a top-up plus a "continue from where you left off"
+`user.message` resumed it with the sandbox's working copy intact. The
+second stop cost only the closing report.
+
+Findings, in priority order:
+
+1. **The lockfile goes through the model — that is the cost.** The
+   sandbox cannot `git push`, so the skill's push path is `push_files`,
+   which means `package-lock.json` (143 KB) is read into context twice
+   and emitted once as output tokens. Fix in the skill: push everything
+   but the lockfile with `push_files`, then create the lockfile blob with
+   `gh api repos/…/git/blobs` (base64 from disk, `gh` works in the
+   sandbox, no token in the call) and commit it via the trees API — or
+   drop the lockfile from the push and let CI generate it. Expect roughly
+   a third of today's cost. `kyles-plumbing` (2026-09-16) presumably paid
+   the same.
+2. **Billing errors are invisible in our surfaces.** No `session.usage`
+   event, the control plane sees only `status_idled`, `GET /sessions/{id}`
+   says `idle`, the app's Fleet tab shows a plain idle session, and
+   `get_session_status`'s compact view has nothing for jarvis to relay.
+   The `session.error` event is in history. Carry the last
+   `session.error` in the compact view and the Fleet tab, and consider
+   the webhook marking the session errored.
+3. **Skill template `CLAUDE.md:82`** still says the CSP carries a SHA-256
+   for the JSON-LD; `public/_headers` and `build-conventions.md` say the
+   opposite. The agent fixed it in the customer repo; fix it in
+   `agents/skills/blueweb-customer-site/assets/template/CLAUDE.md`.
+4. **The skill mount drops exec bits.** `new-site.sh` is `100755` in git
+   but the first call failed `Permission denied`; `bash …/new-site.sh`
+   worked. Change the skill's step 2 to invoke it via `bash`.
+
+Observation, not a finding: the result is visually the same site as
+`kyles-plumbing` — same layout, near-same palette — because the intake
+only supplied an accent colour and no photos, and the agent did what the
+intake said. The skill's "the template is a starting shape, not a
+ceiling" only bites when the intake carries the owner's sign, truck and
+photos. A real client gets a real design brief in the task; nothing to
+change in the fleet for this.
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
