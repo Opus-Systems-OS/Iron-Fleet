@@ -113,7 +113,7 @@ git add -A
 git commit --quiet -m "Scaffold $NAME site
 
 Astro static site from the BlueWeb customer template: strict CSP served from
-public/_headers, LocalBusiness structured data pinned by hash, and a
+public/_headers, LocalBusiness structured data as JSON-LD, and a
 same-origin Pages Function for the contact form.
 
 Business facts are still placeholders — src/data/business.js is the next edit."

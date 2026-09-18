@@ -79,8 +79,11 @@ its replacement path in the same commit. CI fails if `OFFLOAD.md` is deleted.
 ## Constraints that bite
 
 **The CSP is strict and served from `public/_headers`.** `script-src 'self'`
-plus one SHA-256, for the JSON-LD. There is no `'unsafe-inline'`, so an inline
-`<script>` will be refused by the browser with no visual clue on the page —
+with no hash list: the JSON-LD `<script type="application/ld+json">` is data,
+not executable, and browsers do not apply `script-src` to it, so it needs no
+hash and one must not be added back (see `public/_headers`). There is no
+`'unsafe-inline'`, so an inline `<script>` will be refused by the browser
+with no visual clue on the page —
 any real script goes in `public/js/` and is referenced with
 `<script is:inline src="/js/…">`. `style-src-elem 'self'` likewise refuses
 inline `<style>` elements, which is why `astro.config.mjs` sets

@@ -16,26 +16,44 @@ laptop. Everything below still applies, with four differences:
   stand-in; the real secret is substituted at the network edge, and only in
   request *headers* to `github.com` / `api.github.com` / `api.cloudflare.com`.
   Never echo, paste, or write them into a file — they are useless anywhere else.
-- **`git push` cannot work here — use the `github` MCP tools to push.**
+- **`git push` cannot work here — push with `scripts/push-tree.mjs`.**
   GitHub's git-over-HTTPS endpoint accepts only HTTP Basic auth, which
   base64-encodes the token, so the placeholder is never substituted and every
   `git push`/`git fetch`/`gh repo create --push` fails with
   `remote: invalid credentials` (verified 2026-09-14; Bearer/`token` headers
-  are rejected by GitHub even with a real token). The `github` MCP server is
-  wired to the same token and does the pushing:
+  are rejected by GitHub even with a real token). The REST API is fine —
+  `gh api` sends the token in a header — so the skill ships a script that
+  pushes a commit through the git-data API:
 
-  1. `gh repo create BlueWeb-Org/<slug> --private` (the REST half works).
+  1. `gh repo create BlueWeb-Org/<slug> --private --description "…"` (the
+     REST half works). No `--source`/`--push`.
   2. Scaffold and commit locally as usual — the local repo is your working
-     copy and CI/preview source of truth is what lands on GitHub.
-  3. Push with `push_files` (many files, one commit, to a branch) — the
-     scaffold is ~30 small text files, one call. Later changes: `push_files`
-     to a branch, then `create_pull_request`; `gh run list` / `gh pr checks`
-     for CI. Read file contents from disk; never paste a token into a call.
-  4. Keep local git and GitHub in step: after a `push_files`, note the
-     returned commit and treat GitHub as canonical.
+     copy; what lands on GitHub is what CI and the Cloudflare preview build.
+  3. `node <skill dir>/scripts/push-tree.mjs BlueWeb-Org/<slug> main`.
+     It uploads every blob of `HEAD` from disk (base64, mode preserved),
+     creates the tree, commit and ref, and **fails unless GitHub's tree SHA
+     equals `git rev-parse HEAD^{tree}`** — which proves every byte on
+     GitHub matches the local commit. An empty repo is seeded with `.nvmrc`
+     first (the git-data API refuses trees on a repo with no commits). A
+     branch that does not exist is created from the default branch (or
+     `--from <branch>`); one that does is fast-forwarded. Commit message
+     defaults to `HEAD`'s; `-m` overrides. Verified 2026-09-18 on both an
+     empty repo and a new branch: 26 files, CI triggered and green.
+  4. Later changes: commit, `push-tree.mjs … <branch>`, then
+     `gh pr create`; `gh run list` / `gh pr checks` for CI. GitHub is
+     canonical after a push — the remote commit is a different object from
+     the local one (same tree), so do not expect `git log origin/…` to
+     show it.
 
-  `gh` itself (`gh api`, `gh run list`, `gh pr create`, `gh pr checks`) needs
-  nothing extra.
+  **Do not push file contents through the `github` MCP `push_files` tool.**
+  It works, but every byte goes through the model: the 2026-09-18 demo site
+  spent $9.93 of a $10 cap, most of it transcribing a 143 KB
+  `package-lock.json`. `push_files` is acceptable only for a one-line edit
+  to a small file when the script is somehow unavailable. Never paste a
+  token into any call.
+- **Mounted skill files have no exec bits.** The upload is multipart, which
+  carries no modes, so `scripts/new-site.sh` arrives `644` — run it as
+  `bash …/new-site.sh`, never directly (`Permission denied`, 2026-09-18).
 - **Work under `/workspace`.** Repositories you were given are already cloned
   there; scaffold new sites with `--dir /workspace/customers`, not
   `~/Documents`. Cloudflare Pages is connected through the dashboard by a
