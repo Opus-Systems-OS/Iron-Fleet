@@ -64,8 +64,8 @@ async fn run() -> error::Result<()> {
     let db = db::Db::open(&cfg.database_path)?;
     let api = anthropic::Client::new(&cfg.anthropic_base_url, &cfg.anthropic_api_key)?;
 
-    let do_sync = matches!(cli.command, Some(Command::Sync)) || cfg.sync_on_boot;
-    if do_sync {
+    let explicit_sync = matches!(cli.command, Some(Command::Sync));
+    if explicit_sync || cfg.sync_on_boot {
         let reg = registry::load_dir(&cfg.agents_dir)?;
         tracing::info!(
             agents = reg.agents.len(),
@@ -73,8 +73,21 @@ async fn run() -> error::Result<()> {
             dir = %cfg.agents_dir.display(),
             "registry loaded"
         );
-        let report = registry::sync::sync(&reg, &api, &db).await?;
-        print_new_environment_keys(&report.new_environment_keys);
+        match registry::sync::sync(&reg, &api, &db).await {
+            Ok(report) => print_new_environment_keys(&report.new_environment_keys),
+            Err(e) if explicit_sync => return Err(e),
+            // Boot sync is convergence, not a precondition: the registry the
+            // DB already holds served the last boot. A failed sync must not
+            // take /usage, /agents and every session route down with it —
+            // 2026-09-18 a `400 credit balance is too low` on a skill upload
+            // crash-looped the control plane for 70 s until SYNC_ON_BOOT was
+            // flipped by hand. Sync is idempotent; the next boot, or
+            // `control-plane sync`, picks up where this left off.
+            Err(e) => tracing::error!(
+                error = %e,
+                "boot sync failed — serving the last synced registry; rerun with `control-plane sync` or restart once the cause is fixed"
+            ),
+        }
     }
 
     let mcp_fleet_vault_id = match (&cfg.mcp_fleet_url, &cfg.mcp_fleet_token) {
