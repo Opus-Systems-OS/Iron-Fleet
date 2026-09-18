@@ -45,8 +45,8 @@ means editing one data file.
 Check before the first customer site, and re-check if any step below errors on
 authentication. Full detail in `references/preflight.md` — and if `GH_TOKEN`
 is already set in your environment, read its "In a Managed Agents sandbox"
-section first: `git push` does not work there and the `github` MCP tools
-replace it.
+section first: `git push` does not work there and `scripts/push-tree.mjs`
+replaces it.
 
 ```sh
 gh auth status                       # needs the `workflow` scope — see below
@@ -74,12 +74,13 @@ structured to match it field for field.
 
 ```sh
 # Path is relative to this skill's directory, wherever it is mounted.
-scripts/new-site.sh \
+# Always through `bash`: a mounted skill has no exec bits.
+bash scripts/new-site.sh \
   --name "Kenn's Plumbing" --slug kenns-plumbing --domain kennsplumbing.com
 ```
 
-Creates `~/Documents/BlueWeb/customers/<slug>` with a lockfile, a current CSP
-hash and one git commit. Use the domain they *will* buy even if they have not
+Creates `~/Documents/BlueWeb/customers/<slug>` with a lockfile and one git
+commit. Use the domain they *will* buy even if they have not
 bought it yet — it is only used for canonical URLs.
 
 ### 3. Build the site
@@ -106,6 +107,13 @@ cd ~/Documents/BlueWeb/customers/<slug>
 gh repo create BlueWeb-Org/<slug> --private --source=. --remote=origin --push
 gh run list --limit 3          # CI should be green before anyone sees this
 ```
+
+In the Managed Agents sandbox `--push` cannot work; create the repo
+without it and push with `scripts/push-tree.mjs` instead — see
+`references/preflight.md`, "In a Managed Agents sandbox". Never push a
+file's contents through a model tool call (`push_files`) when the script
+can push the commit: it uploads every file from disk, byte-exact, and
+proves it by tree SHA.
 
 ### 5. Deploy
 
@@ -145,6 +153,8 @@ promptly; a clean exit is a referral.
 
 A change request on the $99/month plan is: branch, edit `business.js`, PR,
 check CI and the Cloudflare preview, report the preview URL, merge when told.
+(From the sandbox: commit locally, `node scripts/push-tree.mjs
+BlueWeb-Org/<slug> <branch>`, then `gh pr create`.)
 There is deliberately no extra command to remember — see
 `references/build-conventions.md` on why the CSP carries no hash. If a request cannot be satisfied by editing
 `business.js`, that is a signal the data file is missing a field — add it
