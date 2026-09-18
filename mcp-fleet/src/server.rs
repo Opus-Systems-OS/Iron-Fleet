@@ -57,8 +57,24 @@ pub struct SendEventArgs {
 /// against a 50 ¢ cap.
 ///
 /// `session` is `GET /sessions/{id}`; `latest` is
-/// `GET /sessions/{id}/events?order=desc&types=agent.message&limit=1`.
-fn session_view(session: &Value, latest: &Value) -> Value {
+/// `GET /sessions/{id}/events?order=desc&types=agent.message&limit=1`;
+/// `newest` is the same with `types=agent.message,session.error` — if that
+/// one is a `session.error`, the session's last turn died on it (billing,
+/// upstream outage) and `last_error` says so. A session that idles on an
+/// error looks exactly like one that idled on a reply otherwise: same
+/// `status: idle`, and `last_reply` is whatever it said *before* dying.
+fn session_view(session: &Value, latest: &Value, newest: &Value) -> Value {
+    let last_error = newest["data"]
+        .as_array()
+        .and_then(|d| d.first())
+        .filter(|ev| ev["type"] == "session.error")
+        .map(|ev| {
+            let kind = ev["error"]["type"].as_str().unwrap_or("error");
+            match ev["error"]["message"].as_str().map(str::trim) {
+                Some(m) if !m.is_empty() => format!("{kind}: {m}"),
+                _ => kind.to_owned(),
+            }
+        });
     let last_reply = latest["data"]
         .as_array()
         .and_then(|d| d.first())
@@ -83,6 +99,7 @@ fn session_view(session: &Value, latest: &Value) -> Value {
         "created_at": session["created_at"],
         "updated_at": session["updated_at"],
         "last_reply": last_reply,
+        "last_error": last_error,
         "console_url": session["console_url"],
     })
 }
@@ -143,7 +160,7 @@ impl FleetServer {
     }
 
     #[tool(
-        description = "Get a session's status (running/idle/terminated), what it has spent against its cap in cents, and its latest reply (last_reply) — use this to check on a session you started and relay what it said."
+        description = "Get a session's status (running/idle/terminated), what it has spent against its cap in cents, its latest reply (last_reply), and last_error when its last turn ended on an error instead of a reply (e.g. a billing error — the session still shows idle) — use this to check on a session you started and relay what it said or why it stopped."
     )]
     async fn get_session_status(
         &self,
@@ -157,7 +174,13 @@ impl FleetServer {
                 "/sessions/{id}/events?order=desc&types=agent.message&limit=1"
             ))
             .await?;
-        Ok(session_view(&session, &latest).to_string())
+        let newest = self
+            .client
+            .get_json(&format!(
+                "/sessions/{id}/events?order=desc&types=agent.message,session.error&limit=1"
+            ))
+            .await?;
+        Ok(session_view(&session, &latest, &newest).to_string())
     }
 
     #[tool(description = "Send a follow-up message to a running session.")]
@@ -251,8 +274,9 @@ mod tests {
         let latest = json!({"data": [{"type": "agent.message", "content": [
             {"type": "text", "text": "The driver "}, {"type": "text", "text": "is 616.92."}
         ]}]});
-        let v = session_view(&session, &latest);
+        let v = session_view(&session, &latest, &latest);
         assert_eq!(v["agent_slug"], "gpu-compute");
+        assert!(v["last_error"].is_null());
         assert_eq!(v["environment"], "rig-gpu");
         assert_eq!(v["cap_cents"], "500");
         assert_eq!(v["spent_cents"], "6");
@@ -267,9 +291,34 @@ mod tests {
         let v = session_view(
             &json!({"id": "sesn_1", "status": "running"}),
             &json!({"data": []}),
+            &json!({"data": []}),
         );
         assert_eq!(v["status"], "running");
         assert!(v["last_reply"].is_null());
+        assert!(v["last_error"].is_null());
         assert!(v["spent_cents"].is_null());
+    }
+
+    #[test]
+    fn session_view_reports_a_turn_that_died_on_an_error() {
+        // sesn_015fmiDkNnF9XckJxn1tgZrU, 2026-09-18: idle, last reply from
+        // mid-task, then a billing_error ended the turn.
+        let session = json!({"id": "sesn_1", "status": "idle"});
+        let latest = json!({"data": [{"type": "agent.message",
+            "content": [{"type": "text", "text": "All 26 files are byte-identical. Now checking CI."}]}]});
+        let newest = json!({"data": [{"type": "session.error",
+            "error": {"type": "billing_error",
+                      "message": "Your credit balance is too low to access the Anthropic API.",
+                      "retry_status": {"type": "exhausted"}}}]});
+        let v = session_view(&session, &latest, &newest);
+        assert_eq!(v["status"], "idle");
+        assert_eq!(
+            v["last_reply"],
+            "All 26 files are byte-identical. Now checking CI."
+        );
+        assert_eq!(
+            v["last_error"],
+            "billing_error: Your credit balance is too low to access the Anthropic API."
+        );
     }
 }

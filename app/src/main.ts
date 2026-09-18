@@ -60,6 +60,10 @@ interface UsageRow {
   active_seconds: number | null;
   budget_reached: boolean;
   observed_at: string;
+  // "<type>: <message>" when the session's last turn died on a
+  // session.error (billing, upstream) rather than ending on a reply. Such a
+  // session still reads `idle` everywhere else.
+  last_error: string | null;
 }
 
 interface UsageResponse {
@@ -405,7 +409,11 @@ function renderEvent(ev: SessionEventPayload["event"]) {
       setSessionStatus("running");
       break;
     case "idle":
-      setSessionStatus(r.stop_reason === "budget_reached" ? "budget_reached" : "idle");
+      // `retries_exhausted` is how a turn that died on a session.error
+      // idles; keep the failed badge the error event just set.
+      setSessionStatus(
+        r.stop_reason === "budget_reached" ? "budget_reached" : r.stop_reason === "retries_exhausted" ? "failed" : "idle",
+      );
       break;
     case "error":
       setSessionStatus("failed");
@@ -479,11 +487,22 @@ function renderUsage(usage: UsageResponse) {
       <td>${escapeHtml(r.environment_slug ?? "—")}</td>
       <td class="mono">${r.list_cost_cents !== null ? centsToDollars(r.list_cost_cents) : "—"}</td>
       <td class="mono">${r.active_seconds !== null ? `${r.active_seconds.toFixed(1)}s` : "—"}</td>
-      <td>${r.budget_reached ? `<span class="badge badge-alert">yes</span>` : `<span class="badge badge-idle">no</span>`}</td>
+      <td>${stoppedBy(r)}</td>
       <td class="dim">${formatRelative(r.observed_at)}</td>
     `;
     usageRecentBody.appendChild(tr);
   }
+}
+
+/// Why a session stopped, if it was anything other than finishing its turn:
+/// the budget cap, or an error that ended the turn (hover for the message).
+function stoppedBy(r: UsageRow): string {
+  if (r.budget_reached) return `<span class="badge badge-alert">budget</span>`;
+  if (r.last_error) {
+    const kind = r.last_error.split(":")[0];
+    return `<span class="badge badge-alert" title="${escapeHtml(r.last_error)}">${escapeHtml(kind)}</span>`;
+  }
+  return `<span class="dim">—</span>`;
 }
 
 // ---- shared -----------------------------------------------------------

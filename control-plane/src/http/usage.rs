@@ -123,10 +123,12 @@ pub async fn export_csv(
 }
 
 const CSV_HEADER: &str = "session_id,agent_slug,environment_slug,list_cost_cents,input_tokens,\
-                          output_tokens,active_seconds,budget_reached,last_event_type,observed_at";
+                          output_tokens,active_seconds,budget_reached,last_event_type,observed_at,\
+                          last_error";
 
-/// RFC 4180 with `\n` line endings. Ten columns of ids and numbers don't
-/// justify a crate; `quote` covers the slugs and event types anyway.
+/// RFC 4180 with `\n` line endings. Eleven columns of ids and numbers don't
+/// justify a crate; `quote` covers the slugs, event types and error text.
+/// `last_error` was appended 2026-09-18; exports before that have ten columns.
 fn to_csv(rows: &[UsageRow]) -> String {
     let mut out = String::with_capacity(rows.len() * 160);
     out.push_str(CSV_HEADER);
@@ -135,7 +137,7 @@ fn to_csv(rows: &[UsageRow]) -> String {
         let opt = |s: Option<String>| s.unwrap_or_default();
         let _ = writeln!(
             out,
-            "{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{}",
             quote(&r.session_id),
             quote(&r.agent_slug),
             quote(&opt(r.environment_slug.clone())),
@@ -146,6 +148,7 @@ fn to_csv(rows: &[UsageRow]) -> String {
             u8::from(r.budget_reached),
             quote(&r.last_event_type),
             quote(&r.observed_at),
+            quote(&opt(r.last_error.clone())),
         );
     }
     out
@@ -211,6 +214,7 @@ mod tests {
             budget_reached: true,
             last_event_type: event.into(),
             observed_at: "2026-09-15T00:00:00Z".into(),
+            last_error: None,
         }
     }
 
@@ -221,7 +225,7 @@ mod tests {
         assert_eq!(lines.next().unwrap(), CSV_HEADER);
         assert_eq!(
             lines.next().unwrap(),
-            "sesn_1,jarvis,,5,10,,1.5,1,session.status_idled,2026-09-15T00:00:00Z"
+            "sesn_1,jarvis,,5,10,,1.5,1,session.status_idled,2026-09-15T00:00:00Z,"
         );
         assert!(lines.next().is_none());
     }
@@ -229,7 +233,17 @@ mod tests {
     #[test]
     fn csv_quotes_fields_that_need_it() {
         let csv = to_csv(&[row("sesn_1", "odd,\"event\"")]);
-        assert!(csv.ends_with(",\"odd,\"\"event\"\"\",2026-09-15T00:00:00Z\n"));
+        assert!(csv.ends_with(",\"odd,\"\"event\"\"\",2026-09-15T00:00:00Z,\n"));
         assert_eq!(quote("plain"), "plain");
+    }
+
+    #[test]
+    fn csv_carries_last_error_in_the_final_column() {
+        let mut r = row("sesn_1", "session.status_idled");
+        r.last_error = Some("billing_error: Your credit balance is too low, top up".into());
+        let csv = to_csv(&[r]);
+        assert!(csv.ends_with(
+            ",2026-09-15T00:00:00Z,\"billing_error: Your credit balance is too low, top up\"\n"
+        ));
     }
 }

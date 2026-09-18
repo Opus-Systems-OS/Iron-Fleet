@@ -127,6 +127,30 @@ pub async fn handle(
 /// An upstream failure propagates as 5xx so Anthropic retries the delivery.
 async fn on_session_event(state: &AppState, event: &Envelope, budget_reached: bool) -> Result<()> {
     let session = state.api.get_session(&event.data.id).await?;
+    // A session that dies on a `session.error` (billing, upstream outage)
+    // still idles — same webhook, same `status: idle`, no `session.usage`.
+    // The only trace is in its event history, so ask for the newest of
+    // {reply, error}: an error there means the turn ended on it. Best
+    // effort: the usage rollup above is the record, this is an annotation.
+    let last_error = match state
+        .api
+        .list_events_raw(
+            &event.data.id,
+            &[
+                ("order", "desc"),
+                ("types[]", "agent.message"),
+                ("types[]", "session.error"),
+                ("limit", "1"),
+            ],
+        )
+        .await
+    {
+        Ok(newest) => ended_on_error(&newest),
+        Err(e) => {
+            tracing::warn!(session = %event.data.id, error = %e, "could not read the session's newest event; last_error left unset");
+            None
+        }
+    };
 
     let slug = session
         .metadata
@@ -152,6 +176,18 @@ async fn on_session_event(state: &AppState, event: &Envelope, budget_reached: bo
             occurred_at = %event.created_at,
             "BUDGET REACHED — session paused; only a budget change or removal resumes it"
         );
+    } else if let Some(err) = &last_error {
+        tracing::warn!(
+            event = SESSION_STATUS_IDLED,
+            slug = %slug,
+            session = %session.id,
+            status = %session.status,
+            list_cost_cents = %fmt_cents(list_cost),
+            cap_cents = %fmt_cents(cap),
+            occurred_at = %event.created_at,
+            error = %err,
+            "SESSION ERROR — the turn ended on an error, not a reply"
+        );
     } else {
         tracing::info!(
             event = SESSION_STATUS_IDLED,
@@ -175,8 +211,27 @@ async fn on_session_event(state: &AppState, event: &Envelope, budget_reached: bo
         active_seconds: usage.and_then(|u| u.active_seconds),
         budget_reached,
         last_event_type: event.data.kind.clone(),
+        last_error,
     })?;
     Ok(())
+}
+
+/// `"<type>: <message>"` when the newest of a session's {`agent.message`,
+/// `session.error`} events is the error — i.e. the events envelope from
+/// `?order=desc&types[]=agent.message&types[]=session.error&limit=1`.
+/// `None` when the newest is a reply, or there is nothing at all.
+pub fn ended_on_error(newest: &serde_json::Value) -> Option<String> {
+    let ev = newest["data"].as_array()?.first()?;
+    if ev["type"].as_str()? != "session.error" {
+        return None;
+    }
+    let kind = ev["error"]["type"].as_str().unwrap_or("error");
+    let message = ev["error"]["message"].as_str().unwrap_or("").trim();
+    Some(if message.is_empty() {
+        kind.to_owned()
+    } else {
+        format!("{kind}: {message}")
+    })
 }
 
 pub fn unix_now() -> i64 {
@@ -206,5 +261,23 @@ mod tests {
         .unwrap();
         assert_eq!(e.data.kind, SESSION_STATUS_IDLED);
         assert_eq!(e.data.id, "sesn_1");
+    }
+
+    #[test]
+    fn ended_on_error_reads_the_newest_of_reply_and_error() {
+        let error = serde_json::json!({"data":[{
+            "type":"session.error","id":"sevt_1",
+            "error":{"type":"billing_error","message":"Your credit balance is too low.",
+                     "retry_status":{"type":"exhausted"}}}]});
+        assert_eq!(
+            ended_on_error(&error).as_deref(),
+            Some("billing_error: Your credit balance is too low.")
+        );
+        let reply = serde_json::json!({"data":[{"type":"agent.message","id":"sevt_2",
+            "content":[{"type":"text","text":"done"}]}]});
+        assert_eq!(ended_on_error(&reply), None);
+        assert_eq!(ended_on_error(&serde_json::json!({"data":[]})), None);
+        let bare = serde_json::json!({"data":[{"type":"session.error","error":{"type":"overloaded_error"}}]});
+        assert_eq!(ended_on_error(&bare).as_deref(), Some("overloaded_error"));
     }
 }
