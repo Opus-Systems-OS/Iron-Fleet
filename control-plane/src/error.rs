@@ -80,9 +80,14 @@ impl Error {
             Error::EnvironmentNotProvisioned(_) => StatusCode::CONFLICT,
             Error::InvalidRequest(_) | Error::WebhookSignature(_) => StatusCode::BAD_REQUEST,
             Error::Unauthorized => StatusCode::UNAUTHORIZED,
+            // Anthropic's 400 is the caller's (malformed id, bad event) and
+            // stays a 400 — found 2026-09-18 when the API's C# SDK saw a bad
+            // session id come back as 502. 404 stays 404; 429/529 are
+            // "try later"; anything else is a gateway failure.
             Error::Upstream { status, .. } => match *status {
+                400 => StatusCode::BAD_REQUEST,
                 404 => StatusCode::NOT_FOUND,
-                429 => StatusCode::SERVICE_UNAVAILABLE,
+                429 | 529 => StatusCode::SERVICE_UNAVAILABLE,
                 _ => StatusCode::BAD_GATEWAY,
             },
             Error::UpstreamTransport(_) => StatusCode::BAD_GATEWAY,
@@ -179,7 +184,12 @@ mod tests {
         };
         assert_eq!(up(404).status(), StatusCode::NOT_FOUND);
         assert_eq!(up(429).status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(up(400).status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(up(529).status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            up(400).status(),
+            StatusCode::BAD_REQUEST,
+            "Anthropic's 400 is the caller's, not a gateway failure"
+        );
         assert_eq!(up(500).status(), StatusCode::BAD_GATEWAY);
     }
 
