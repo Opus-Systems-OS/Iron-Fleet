@@ -1,5 +1,5 @@
 # Iron-Fleet on the opustower.dev droplet: Caddy in front of the two binaries
-# we already ship. Images come from GHCR (.github/workflows/images.yml); this
+# we ship here plus the Opus Systems OS API (its own repo, same box). Images come from GHCR (.github/workflows/images.yml); this
 # box never builds. Only Caddy publishes ports — the services are reachable
 # solely through it, on the compose network.
 #
@@ -21,6 +21,7 @@ services:
     depends_on:
       - control-plane
       - mcp-fleet
+      - api
 
   control-plane:
     image: ghcr.io/opus-systems-os/iron-fleet/control-plane:latest
@@ -48,7 +49,24 @@ services:
     depends_on:
       - control-plane
 
+  # Opus Systems OS API — github.com/Opus-Systems-OS/Opus-Systems-OS-API.
+  # The public front door; the control plane becomes its upstream. Holds
+  # CONTROL_PLANE_TOKEN (already in .env) and its own keys DB, nothing else.
+  api:
+    image: ghcr.io/opus-systems-os/opus-systems-os-api/api:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "8100"
+      DATABASE_PATH: /data/opus-api.db
+      CONTROL_PLANE_URL: http://control-plane:8080
+    volumes:
+      - api_data:/data
+    depends_on:
+      - control-plane
+
 volumes:
   cp_data:
+  api_data:
   caddy_data:
   caddy_config:

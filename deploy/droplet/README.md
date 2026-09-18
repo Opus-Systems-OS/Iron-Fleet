@@ -17,7 +17,8 @@ the two images GitHub Actions publishes to GHCR — and builds nothing.
 | `backup.env.example` | R2 token, bucket, age recipient. Copy to `backup.env`, `chmod 600`. Read only by `backup.sh`. |
 | `restore.sh` | Runs on the Mac: fetch a bundle (or `latest`), decrypt, `integrity_check`, print the agents and the re-seed commands. Never touches the droplet. |
 
-Images: `ghcr.io/opus-systems-os/iron-fleet/control-plane` and `…/mcp-fleet`,
+Images: `ghcr.io/opus-systems-os/iron-fleet/control-plane`, `…/mcp-fleet`, and
+`ghcr.io/opus-systems-os/opus-systems-os-api/api` (the API, its own repo),
 built by `.github/workflows/images.yml` on every push to `main` that touches
 either crate, `agents/`, or the workspace manifests. Both packages are
 public (the repo is), so the droplet pulls without a login. If they ever go

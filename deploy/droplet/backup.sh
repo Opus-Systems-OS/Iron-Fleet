@@ -12,6 +12,9 @@ set -euo pipefail
 
 HERE=/opt/iron-fleet/deploy/droplet
 DB=/var/lib/docker/volumes/droplet_cp_data/_data/control-plane.db
+# The API's keys database (Opus-Systems-OS-API). Optional until that service
+# has booted once; a bundle without it restores a fleet with no client keys.
+API_DB=/var/lib/docker/volumes/droplet_api_data/_data/opus-api.db
 CADDY_DATA=/var/lib/docker/volumes/droplet_caddy_data/_data
 LOCAL=/var/backups/iron-fleet
 KEEP_LOCAL=3
@@ -40,16 +43,27 @@ if [[ "$check" != "ok" ]]; then
   exit 1
 fi
 agents=$(sqlite3 "$TMP/control-plane.db" 'SELECT count(*) FROM agents;')
+api_keys=absent
+if [[ -f "$API_DB" ]]; then
+  sqlite3 "$API_DB" ".backup '$TMP/opus-api.db'"
+  check=$(sqlite3 "$TMP/opus-api.db" 'PRAGMA integrity_check;')
+  if [[ "$check" != "ok" ]]; then
+    echo "backup: integrity_check failed on the API snapshot: $check" >&2
+    exit 1
+  fi
+  api_keys=$(sqlite3 "$TMP/opus-api.db" 'SELECT count(*) FROM api_keys;')
+fi
 
 # --- secrets and TLS state -----------------------------------------------
 cp "$HERE/.env" "$TMP/env"
 cp "$HERE/backup.env" "$TMP/backup.env"
 # The volume also holds Caddy's access logs (MBs, rolling) — only certs/ACME state is worth keeping.
 tar -C "$CADDY_DATA" --exclude='access-*.log' -cf "$TMP/caddy_data.tar" .
-printf 'stamp=%s\nagents=%s\ndb_bytes=%s\n' "$STAMP" "$agents" "$(stat -c %s "$TMP/control-plane.db")" > "$TMP/MANIFEST"
+printf 'stamp=%s\nagents=%s\ndb_bytes=%s\napi_keys=%s\n' "$STAMP" "$agents" "$(stat -c %s "$TMP/control-plane.db")" "$api_keys" > "$TMP/MANIFEST"
 
 # --- encrypt + upload ----------------------------------------------------
 tar -C "$TMP" -cf - control-plane.db env backup.env caddy_data.tar MANIFEST \
+    $([[ -f "$TMP/opus-api.db" ]] && echo opus-api.db) \
   | age -r "$AGE_RECIPIENT" -o "$LOCAL/$NAME"
 chmod 600 "$LOCAL/$NAME"
 

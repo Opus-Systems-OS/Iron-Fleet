@@ -55,6 +55,11 @@ echo "integrity_check: $check"
 echo "agents:"
 sqlite3 -header -column "$DIR/control-plane.db" 'SELECT slug, anthropic_id, anthropic_version FROM agents ORDER BY slug;'
 echo "session_usage rows: $(sqlite3 "$DIR/control-plane.db" 'SELECT count(*) FROM session_usage;')"
+if [[ -f "$DIR/opus-api.db" ]]; then
+  echo "api keys: $(sqlite3 "$DIR/opus-api.db" 'SELECT count(*) FROM api_keys WHERE revoked_at IS NULL;') active (opus-api.db)"
+else
+  echo "api keys: no opus-api.db in this bundle (predates the API, or it had not booted)"
+fi
 
 cat <<EOF
 
@@ -66,6 +71,7 @@ To prove the restore, serve it locally (no Anthropic calls with SYNC_ON_BOOT=fal
   curl -H 'Authorization: Bearer dev' localhost:18080/usage
 
 To re-seed a droplet from it, follow "First deploy" in deploy/droplet/README.md
-with $DIR/control-plane.db as the seed, $DIR/env as .env and
-$DIR/caddy_data.tar untarred into the droplet_caddy_data volume.
+with $DIR/control-plane.db as the seed, $DIR/env as .env,
+$DIR/caddy_data.tar untarred into the droplet_caddy_data volume, and
+$DIR/opus-api.db (if present) copied into the droplet_api_data volume.
 EOF
