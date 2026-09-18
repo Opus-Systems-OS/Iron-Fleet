@@ -58,10 +58,13 @@ pub fn set_connection(
     Ok(status)
 }
 
+/// `GET /fleet/agents` — the API wraps every list in `{data: […]}`; the
+/// frontend wants the array.
 #[tauri::command]
 pub async fn list_agents(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let cfg = require_config(&state)?;
-    get_json(&state.http, &cfg, "/agents").await
+    let mut envelope = get_json(&state.http, &cfg, "/fleet/agents").await?;
+    Ok(envelope["data"].take())
 }
 
 /// Most recent 50 sessions, newest first. Pagination is out of scope — the
@@ -148,12 +151,12 @@ pub async fn get_usage(state: State<'_, AppState>) -> Result<serde_json::Value, 
     get_json(&state.http, &cfg, "/usage").await
 }
 
-/// The Fleet tab's one-line rig status (Phase 6). Three outcomes, decided
-/// on the HTTP status so the frontend never parses an error string:
-/// `404` — this deployment has no `INFERENCE_URL`, show nothing;
-/// `503` — configured but the rig (or the tailnet) is down;
-/// `200` — Ollama's `/api/tags`, reduced to model names.
-#[derive(Debug, Serialize)]
+/// The Fleet tab's one-line rig status (Phase 6): the API's `GET /rig`,
+/// which is always 200 with `{configured, online, models, reason}` — the
+/// three-way answer is composed server-side now. A non-200 (an API too old
+/// to have `/rig`, or unreachable) reads as "not configured" with the
+/// reason, so the line never blocks the tables around it.
+#[derive(Debug, Serialize, serde::Deserialize)]
 pub struct RigStatus {
     configured: bool,
     online: bool,
@@ -164,48 +167,14 @@ pub struct RigStatus {
 #[tauri::command]
 pub async fn get_inference_models(state: State<'_, AppState>) -> Result<RigStatus, String> {
     let cfg = require_config(&state)?;
-    let url = format!("{}/inference/models", cfg.url);
-    let resp = state
-        .http
-        .get(&url)
-        .bearer_auth(&cfg.token)
-        .send()
-        .await
-        .map_err(|e| format!("could not reach {}: {e}", cfg.url))?;
-    let status = resp.status();
-    match status.as_u16() {
-        404 => Ok(RigStatus {
+    match get_json(&state.http, &cfg, "/rig").await {
+        Ok(body) => serde_json::from_value(body).map_err(|e| format!("/rig: {e}")),
+        Err(reason) => Ok(RigStatus {
             configured: false,
             online: false,
             models: Vec::new(),
-            reason: None,
+            reason: Some(reason),
         }),
-        503 => {
-            let body: serde_json::Value = resp.json().await.unwrap_or_default();
-            Ok(RigStatus {
-                configured: true,
-                online: false,
-                models: Vec::new(),
-                reason: body["error"]["message"].as_str().map(str::to_owned),
-            })
-        }
-        _ => {
-            let body = read_response(resp).await?;
-            let models = body["models"]
-                .as_array()
-                .map(|ms| {
-                    ms.iter()
-                        .filter_map(|m| m["name"].as_str().map(str::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default();
-            Ok(RigStatus {
-                configured: true,
-                online: true,
-                models,
-                reason: None,
-            })
-        }
     }
 }
 
@@ -283,7 +252,7 @@ fn require_config(state: &AppState) -> Result<ControlPlaneConfig, String> {
         .lock()
         .expect("config mutex poisoned")
         .clone()
-        .ok_or_else(|| "not connected — set the control plane URL and token first".to_owned())
+        .ok_or_else(|| "not connected — set the API URL and key first".to_owned())
 }
 
 async fn get_json(

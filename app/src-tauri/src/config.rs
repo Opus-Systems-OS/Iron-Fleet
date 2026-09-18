@@ -6,7 +6,10 @@
 //! data, so it's fine for it to live in a small local file. `CONTROL_PLANE_URL`
 //! / `CONTROL_PLANE_TOKEN` env vars win when set (handy for `npm run tauri
 //! dev`); otherwise it's read from `<app config dir>/control-plane.json`,
-//! written by the in-app connection form.
+//! written by the in-app connection form. Since the Opus Systems OS API
+//! (2026-09-18) `url` is the API base including `/v1`
+//! (`https://api.opustower.dev/v1`) and `token` is a per-device API key
+//! (`osk_…`); the file name is historical.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
