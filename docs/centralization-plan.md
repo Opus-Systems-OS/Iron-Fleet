@@ -584,6 +584,19 @@ not yet** (the redirect covers it until someone runs
 `git remote set-url origin https://github.com/Opus-Systems-OS/Iron-Fleet.git`
 there).
 
+**Opus Systems OS API — stage 1 live 2026-09-18 ~03:54 UTC.** Its own
+repo, `Opus-Systems-OS/Opus-Systems-OS-API` (Rust/axum gateway; plan,
+contract and "resume here" in that repo's `CLAUDE.md`, `docs/api-design.md`,
+`docs/status.md`). Runs on this droplet as the `api` compose service
+(PR #27) at `https://api.opustower.dev`, holding only `CONTROL_PLANE_TOKEN`
+and its own keys DB (`droplet_api_data`, in the nightly bundle). It is the
+front door for every client from here on; `fleet.opustower.dev` stays
+client-facing until the API's stage 4, after which Caddy will expose only
+the webhook there. Gotcha: the Caddyfile is a single-file bind mount —
+`git pull` replaces the inode, `caddy reload` reports "config is
+unchanged" — after any Caddyfile change run
+`docker compose up -d --force-recreate caddy`.
+
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
 
