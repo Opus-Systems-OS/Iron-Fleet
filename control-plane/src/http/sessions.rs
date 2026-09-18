@@ -3,7 +3,9 @@
 //! and passed through unchanged.
 
 use super::AppState;
-use crate::anthropic::types::{AgentRef, Budget, SessionCreate, SessionEvent, SessionResource};
+use crate::anthropic::types::{
+    AgentRef, Budget, CustomTool, SessionCreate, SessionEvent, SessionResource,
+};
 use crate::error::{Error, Result};
 use crate::money::Cents;
 use crate::registry::is_github_repo_url;
@@ -43,7 +45,18 @@ pub struct CreateRequest {
     /// agent to have a `github` block (that's where the token comes from).
     #[serde(default)]
     pub repositories: Vec<String>,
+    /// Client-executed custom tools for this session only (`type` must be
+    /// `custom`). The session gets the agent's own tools plus these; the
+    /// agent resource is untouched.
+    #[serde(default)]
+    pub tools: Vec<CustomTool>,
+    /// Appended to the agent's system prompt for this session only, after a
+    /// blank line. At most 4 000 characters.
+    #[serde(default)]
+    pub system_suffix: Option<String>,
 }
+
+const SYSTEM_SUFFIX_MAX_CHARS: usize = 4_000;
 
 #[derive(Debug, Serialize)]
 pub struct CreateResponse {
@@ -155,8 +168,10 @@ pub async fn create(
     let mut vault_ids: Vec<String> = state.mcp_fleet_vault_id.iter().cloned().collect();
     vault_ids.extend(state.db.agent_vault(&agent.slug)?);
 
+    let agent_ref = agent_ref(&state, &agent, &req.tools, req.system_suffix.as_deref()).await?;
+
     let body = SessionCreate {
-        agent: AgentRef::pinned(&agent.agent_id, agent.agent_version),
+        agent: agent_ref,
         environment_id: environment_id.clone(),
         title: Some(title_from(task)),
         budget: Budget::limit(agent.max_list_cost_cents),
@@ -177,6 +192,8 @@ pub async fn create(
         environment = %env_slug,
         cap_cents = %agent.max_list_cost_cents,
         repositories = body.resources.len(),
+        custom_tools = req.tools.len(),
+        system_suffix = req.system_suffix.is_some(),
         "session created"
     );
 
@@ -196,6 +213,156 @@ pub async fn create(
             },
         }),
     ))
+}
+
+/// Pinned, unless the caller added tools or a system suffix — then the
+/// `agent_with_overrides` form, built on the agent's *live* definition (a
+/// `tools` override replaces the list in full, so the agent's own tools
+/// must be restated; `GET /v1/agents/{id}` is the one source that already
+/// has `mcp_toolset` names and everything else resolved).
+async fn agent_ref(
+    state: &AppState,
+    agent: &crate::db::AgentRow,
+    tools: &[CustomTool],
+    system_suffix: Option<&str>,
+) -> Result<AgentRef> {
+    let suffix = system_suffix.map(str::trim).filter(|s| !s.is_empty());
+    if tools.is_empty() && suffix.is_none() {
+        return Ok(AgentRef::pinned(&agent.agent_id, agent.agent_version));
+    }
+    validate_custom_tools(tools)?;
+    if let Some(sfx) = suffix {
+        if sfx.chars().count() > SYSTEM_SUFFIX_MAX_CHARS {
+            return Err(Error::InvalidRequest(format!(
+                "system_suffix is longer than {SYSTEM_SUFFIX_MAX_CHARS} characters"
+            )));
+        }
+    }
+    let live = state.api.get_agent_raw(&agent.agent_id).await?;
+    Ok(build_overrides(agent, &live, tools, suffix))
+}
+
+/// Pure assembly, for tests: the live agent's tools + the custom ones; the
+/// live system prompt + a blank line + the suffix.
+fn build_overrides(
+    agent: &crate::db::AgentRow,
+    live: &Value,
+    tools: &[CustomTool],
+    suffix: Option<&str>,
+) -> AgentRef {
+    let merged_tools = if tools.is_empty() {
+        None
+    } else {
+        let mut list: Vec<Value> = live["tools"].as_array().cloned().unwrap_or_default();
+        list.extend(
+            tools
+                .iter()
+                .map(|t| serde_json::to_value(t).expect("serializable")),
+        );
+        Some(list)
+    };
+    let system = suffix.map(|sfx| match live["system"].as_str() {
+        Some(base) if !base.trim().is_empty() => format!("{base}\n\n{sfx}"),
+        _ => sfx.to_owned(),
+    });
+    AgentRef::with_overrides(&agent.agent_id, agent.agent_version, merged_tools, system)
+}
+
+fn validate_custom_tools(tools: &[CustomTool]) -> Result<()> {
+    if tools.len() > 32 {
+        return Err(Error::InvalidRequest("at most 32 custom tools".into()));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for t in tools {
+        if t.kind != "custom" {
+            return Err(Error::InvalidRequest(format!(
+                "tool `{}`: only type `custom` may be added to a session",
+                t.name
+            )));
+        }
+        let name_ok = !t.name.is_empty()
+            && t.name.len() <= 64
+            && t.name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        if !name_ok {
+            return Err(Error::InvalidRequest(format!(
+                "tool name `{}` must be 1-64 chars of [a-z0-9_]",
+                t.name
+            )));
+        }
+        if !seen.insert(t.name.as_str()) {
+            return Err(Error::InvalidRequest(format!(
+                "duplicate tool `{}`",
+                t.name
+            )));
+        }
+        if t.description.trim().is_empty() {
+            return Err(Error::InvalidRequest(format!(
+                "tool `{}` needs a description",
+                t.name
+            )));
+        }
+        if !t.input_schema.is_object() {
+            return Err(Error::InvalidRequest(format!(
+                "tool `{}`: input_schema must be a JSON Schema object",
+                t.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Body of `POST /sessions/{id}/tool-results`: answers to
+/// `agent.custom_tool_use` events, by id.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolResultsRequest {
+    pub results: Vec<ToolResult>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolResult {
+    /// The `id` of the `agent.custom_tool_use` event being answered.
+    pub custom_tool_use_id: String,
+    /// What the tool returned, as text.
+    pub content: String,
+    #[serde(default)]
+    pub is_error: bool,
+}
+
+pub async fn tool_results(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Result<Json<ToolResultsRequest>, JsonRejection>,
+) -> Result<Json<Value>> {
+    if !valid_session_id(&id) {
+        return Err(Error::InvalidRequest(
+            "session id has unexpected characters".into(),
+        ));
+    }
+    let Json(req) = body.map_err(|e| Error::InvalidRequest(e.body_text()))?;
+    if req.results.is_empty() {
+        return Err(Error::InvalidRequest("results must not be empty".into()));
+    }
+    let mut events = Vec::with_capacity(req.results.len());
+    for r in &req.results {
+        if !valid_session_id(&r.custom_tool_use_id) {
+            return Err(Error::InvalidRequest(
+                "custom_tool_use_id has unexpected characters".into(),
+            ));
+        }
+        events.push(SessionEvent::custom_tool_result(
+            &r.custom_tool_use_id,
+            &r.content,
+            r.is_error,
+        ));
+    }
+    let n = events.len();
+    let result = state.api.send_events(&id, events).await?;
+    tracing::info!(session = %id, results = n, "custom tool results sent");
+    Ok(Json(result))
 }
 
 #[derive(Debug, Deserialize)]
@@ -448,6 +615,95 @@ mod tests {
         let t = title_from(&long);
         assert_eq!(t.chars().count(), TITLE_MAX_CHARS + 1);
         assert!(t.ends_with('…'));
+    }
+
+    fn agent_row() -> crate::db::AgentRow {
+        crate::db::AgentRow {
+            slug: "jarvis".into(),
+            agent_id: "agent_1".into(),
+            agent_version: 5,
+            definition_sha256: String::new(),
+            max_list_cost_cents: "50".parse().unwrap(),
+            effort: "low".into(),
+            default_environment: "cloud-default".into(),
+            synced_at: String::new(),
+        }
+    }
+
+    fn music_tool() -> CustomTool {
+        CustomTool {
+            kind: "custom".into(),
+            name: "play_music".into(),
+            description: "Play something in the Music app.".into(),
+            input_schema: serde_json::json!({"type": "object", "properties": {}}),
+        }
+    }
+
+    #[test]
+    fn overrides_restate_the_live_tools_and_append_the_suffix() {
+        let live = serde_json::json!({
+            "id": "agent_1", "version": 5,
+            "system": "You are Jarvis.",
+            "tools": [{"type": "agent_toolset_20260401"}, {"type": "mcp_toolset", "mcp_server_name": "fleet"}]
+        });
+        let r = build_overrides(&agent_row(), &live, &[music_tool()], Some("Be brief."));
+        assert_eq!(r.kind, "agent_with_overrides");
+        assert_eq!((r.id.as_str(), r.version), ("agent_1", 5));
+        let tools = r.tools.unwrap();
+        assert_eq!(
+            tools.len(),
+            3,
+            "agent's two tools kept, one custom appended"
+        );
+        assert_eq!(tools[1]["mcp_server_name"], "fleet");
+        assert_eq!(tools[2]["type"], "custom");
+        assert_eq!(tools[2]["name"], "play_music");
+        assert_eq!(r.system.as_deref(), Some("You are Jarvis.\n\nBe brief."));
+
+        // Suffix only: tools untouched (None → inherited), system appended.
+        let r = build_overrides(&agent_row(), &live, &[], Some("Be brief."));
+        assert!(r.tools.is_none());
+        assert!(r.system.is_some());
+        // Tools only: system inherited.
+        let r = build_overrides(&agent_row(), &live, &[music_tool()], None);
+        assert!(r.system.is_none());
+        assert_eq!(r.tools.as_ref().unwrap().len(), 3);
+        // The wire shape serializes the type tag and omits absent overrides.
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["type"], "agent_with_overrides");
+        assert!(json.get("system").is_none());
+    }
+
+    #[test]
+    fn custom_tools_are_validated() {
+        assert!(validate_custom_tools(&[music_tool()]).is_ok());
+        let mut bad = music_tool();
+        bad.kind = "agent_toolset_20260401".into();
+        assert!(validate_custom_tools(&[bad]).is_err(), "only custom");
+        let mut bad = music_tool();
+        bad.name = "Play Music".into();
+        assert!(validate_custom_tools(&[bad]).is_err(), "name charset");
+        let mut bad = music_tool();
+        bad.input_schema = serde_json::json!("not an object");
+        assert!(validate_custom_tools(&[bad]).is_err());
+        assert!(
+            validate_custom_tools(&[music_tool(), music_tool()]).is_err(),
+            "duplicate"
+        );
+    }
+
+    #[test]
+    fn custom_tool_result_event_shape() {
+        let ev = SessionEvent::custom_tool_result("sevt_1", "Now playing: Around the World", false);
+        let json = serde_json::to_value(&ev).unwrap();
+        assert_eq!(json["type"], "user.custom_tool_result");
+        assert_eq!(json["custom_tool_use_id"], "sevt_1");
+        assert_eq!(json["content"][0]["text"], "Now playing: Around the World");
+        assert!(json.get("is_error").is_none(), "false is omitted");
+        let err =
+            serde_json::to_value(SessionEvent::custom_tool_result("sevt_1", "no match", true))
+                .unwrap();
+        assert_eq!(err["is_error"], true);
     }
 
     #[test]

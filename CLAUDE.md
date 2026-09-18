@@ -99,9 +99,12 @@ reproducible and diffable.
 - Managed Agents API requests need the `managed-agents-2026-04-01` beta header,
   except memory store endpoints, which use `agent-memory-2026-07-22`. The SDK
   sets these automatically; hand-rolled requests must not forget them.
-- Agent first, then session. The session's `agent` field takes only an ID or
-  `{type, id, version}`. `model`, `system`, `tools`, `mcp_servers`, and `skills`
-  are top-level fields on agent creation, never on session creation.
+- Agent first, then session. The session's `agent` field is a pinned
+  `{type: "agent", id, version}` — or, only when a client adds session-local
+  custom tools or a system suffix, `{type: "agent_with_overrides", …}` built
+  by the control plane on the agent's *live* definition (an override
+  replaces the field in full). Overrides never touch the agent resource;
+  `agents/` remains the only place the fleet is defined.
 - Secrets live in the host's secret store and the rig's environment key stays on
   the rig. Never commit an API key, environment key, or GitHub token.
 
