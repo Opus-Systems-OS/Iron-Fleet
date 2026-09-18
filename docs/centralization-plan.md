@@ -445,10 +445,12 @@ the fleet's real use turns up.
 pressure): `npm run tauri build -- --bundles app` in `app/`, 1m31s,
 bundle copied over `/Applications/J.A.R.V.I.S..app` (binary 10.0 MB,
 `strings` shows `get_inference_models` / `/inference/models`). Launched
-clean. Not smoke-tested against the droplet — the Mac was on the
-FortiGuard-filtered network (403 block page on `/healthz`); on the
-hotspot the Fleet tab should show `Rig · online · nomic-embed-text:latest,
-qwen3:8b` above the agents table.
+clean. **Smoke-tested 2026-09-17 ~22:08 UTC** once the Mac was on an
+unfiltered network: `/healthz` 200, rig off (tailnet `opus` last seen
+9 h earlier, `/inference/models` → `503 rig_offline` in 5.4 s), and the
+Fleet tab showed `Rig · offline · 503 rig_offline` above the four
+agents — the rig-off path, as on Windows. Both desktop clients now run
+the Phase 6 build.
 
 Gotcha: the first build failed with `failed to read plugin permissions:
 … /Users/jameswalker/Documents/Iron Fleet/target.nosync/release/build/
