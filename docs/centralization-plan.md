@@ -8,8 +8,10 @@ step), 8 ¢ total, in the Usage rollup. **Stage 5 passed** the same day:
 jarvis drove all five `mcp-fleet` tools live, dispatching to the rig;
 `get_session_status` gained `last_reply` so it can relay answers. The
 build order is complete; the Mac app rebuild followed the same day.
-First real-shaped job (2026-09-18) worked but cost $9.93 — see
-"First real-shaped job" in Resume here for the four findings.
+First real-shaped job (2026-09-18) worked but cost $9.93; its four
+findings plus a fifth (boot sync crash-loop on a billing error) are fixed
+and deployed — see "First real-shaped job" in Resume here. Skill roll to
+Anthropic waits on credits.
 
 ## Resume here
 
@@ -506,6 +508,54 @@ Findings, in priority order:
 4. **The skill mount drops exec bits.** `new-site.sh` is `100755` in git
    but the first call failed `Permission denied`; `bash …/new-site.sh`
    worked. Change the skill's step 2 to invoke it via `bash`.
+
+**Findings 1–4 fixed 2026-09-18 ~02:15 UTC** (PRs #21 `666e137`, #22
+`f42536e`), deployed, and a fifth found and fixed on the way (#23
+`dd7ea0f`, live):
+
+- **#22, skill:** `scripts/push-tree.mjs` pushes HEAD's tree through the
+  git-data API via `gh api` — blobs from disk, tree/commit/ref, hard
+  failure unless GitHub's tree SHA equals `git rev-parse HEAD^{tree}`.
+  Seeds an empty repo with `.nvmrc` via the contents API (git-data
+  returns `409 Git Repository is empty`, not 404). Tested live on a new
+  branch of `joshs-tires` (two pushes, branch deleted after) and on the
+  empty `BlueWeb-Org/push-tree-smoke` (26 files, tree equal, CI green in
+  23 s). SKILL.md/preflight.md route the sandbox push through it,
+  `push_files` demoted to one-line edits, `bash new-site.sh`, and the
+  CSP-hash claim removed from the template `CLAUDE.md`, the scaffold
+  commit message and SKILL.md step 2. **Not yet rolled to Anthropic** —
+  see the fifth finding. **`BlueWeb-Org/push-tree-smoke` needs deleting
+  by hand** (the Mac's `gh` token lacks `delete_repo`).
+- **#21, session.error surfacing:** `session_usage.last_error` (idempotent
+  `ALTER` on open — verified: the droplet's row for the demo session now
+  carries the column, NULL because it predates the deploy), written by the
+  webhook from `events?order=desc&types[]=agent.message&types[]=session.error&limit=1`
+  when the newest is the error; `/usage` rows and the CSV's appended 11th
+  column carry it; `get_session_status` gains `last_error`; the app's
+  Usage tab shows "Stopped by" and keeps the failed badge on a
+  `retries_exhausted` idle. (Correction to the finding above: the usage
+  row *was* written — `list_cost_cents 993` — it just said nothing about
+  the error.)
+- **Fifth finding, #23:** deploying #22 with the account out of credits
+  again, boot sync's skill upload got `400 credit balance is too low`,
+  `run()` returned it, the process exited and Docker restarted it into
+  the same failure — **~70 s of 502 on `fleet.opustower.dev`**
+  (02:11:20–02:12:30 UTC) until `SYNC_ON_BOOT=false` was set by hand. A
+  billing state on Anthropic's side took our own service down. Now a
+  failed boot sync is one `ERROR` line and the server comes up on the
+  last synced registry (the explicit `control-plane sync` still fails
+  loudly). Verified live: `dd7ea0f` booted with `SYNC_ON_BOOT=true`, sync
+  failed on credits, both `/healthz` 200.
+- Also: the two image builds for #21 and #22 raced and #21's `latest`
+  landed last for control-plane; the first `deploy.sh` ran `666e137`
+  with `f42536e`'s mcp-fleet. Re-running #22's workflow fixed the tag.
+  Merge one PR at a time when both images matter, or wait for the build
+  before the next merge.
+
+**When credits are back:** restart control-plane (`docker compose up -d
+control-plane` on the droplet) or run `control-plane sync`; expect
+`skills_updated: 1, agents_updated: 1` (`blueweb-client` rolls to the
+new skill version). Then delete `push-tree-smoke`.
 
 Observation, not a finding: the result is visually the same site as
 `kyles-plumbing` — same layout, near-same palette — because the intake
