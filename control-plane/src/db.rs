@@ -904,7 +904,7 @@ mod tests {
         assert!(db.agent_github("blueweb-client").unwrap().is_none());
         let gh = AgentGithubRow {
             token_env: "BLUEWEB_GITHUB_TOKEN".into(),
-            mounts: vec!["https://github.com/Opus1247/Iron-Fleet".into()],
+            mounts: vec!["https://github.com/Opus-Systems-OS/Iron-Fleet".into()],
         };
         db.set_agent_github("blueweb-client", Some(&gh)).unwrap();
         assert_eq!(

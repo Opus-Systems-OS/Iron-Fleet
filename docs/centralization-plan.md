@@ -565,6 +565,20 @@ ceiling" only bites when the intake carries the owner's sign, truck and
 photos. A real client gets a real design brief in the task; nothing to
 change in the fleet for this.
 
+**Repos moved to the `Opus-Systems-OS` GitHub org 2026-09-18 ~02:30 UTC:**
+`Opus-Systems-OS/Iron-Fleet` (this repo) and `Opus-Systems-OS/Jarvis` (the
+native Swift app, separate). Old `Opus1247/…` URLs 301-redirect for git
+and web, so nothing broke on the spot; the one thing that *had* to change
+is GHCR — an org repo's Actions token cannot push to a user namespace —
+so images now build to `ghcr.io/opus-systems-os/iron-fleet/…`, the
+droplet compose pulls from there, and **the two new packages must be set
+public in the GitHub UI** (org → Packages → each → Package settings →
+Danger zone → Change visibility) before `deploy.sh` can pull them
+unauthenticated. `agents/blueweb-client.json`'s mount and the tests were
+repointed (rolls `blueweb-client` one version). Remotes to update by hand:
+the rig's checkout and `/opt/iron-fleet` on the droplet (done from the
+Mac for the droplet).
+
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
 
@@ -700,7 +714,8 @@ Everything goes in `deploy/droplet/` in this repo:
 - `README.md`: the runbook.
 - Builds: a Rust release build on 1 vCPU / 961 MB is out. Images are
   built by GitHub Actions (`.github/workflows/images.yml`) on every push to
-  `main` and pushed to `ghcr.io/opus1247/iron-fleet/{control-plane,mcp-fleet}`;
+  `main` and pushed to `ghcr.io/opus-systems-os/iron-fleet/{control-plane,mcp-fleet}`
+  (under `opus1247/…` until the 2026-09-18 move to the `Opus-Systems-OS` org);
   the droplet is run-only (`docker compose pull`). Decided 2026-09-14 over
   building on the Mac — a Rust build under amd64 emulation on Apple Silicon
   is 20–40 min per deploy and ties deploys to the laptop.

@@ -806,7 +806,7 @@ mod tests {
             .as_ref()
             .expect("blueweb-client mounts repositories");
         assert_eq!(gh.token_env, "BLUEWEB_GITHUB_TOKEN");
-        assert_eq!(gh.mount, ["https://github.com/Opus1247/Iron-Fleet"]);
+        assert_eq!(gh.mount, ["https://github.com/Opus-Systems-OS/Iron-Fleet"]);
         assert_eq!(
             bw.default_environment, "blueweb-web",
             "the image with gh + wrangler"
@@ -878,19 +878,19 @@ mod tests {
         ];
         assert!(check_credentials(std::slice::from_ref(&bearer), &servers).is_ok());
 
-        assert!(is_github_repo_url("https://github.com/Opus1247/Iron-Fleet"));
+        assert!(is_github_repo_url("https://github.com/Opus-Systems-OS/Iron-Fleet"));
         for bad in [
-            "https://github.com/Opus1247/Iron-Fleet.git",
-            "https://github.com/Opus1247",
-            "https://github.com/Opus1247/Iron-Fleet/tree/main",
-            "git@github.com:Opus1247/Iron-Fleet.git",
-            "http://github.com/Opus1247/Iron-Fleet",
+            "https://github.com/Opus-Systems-OS/Iron-Fleet.git",
+            "https://github.com/Opus-Systems-OS",
+            "https://github.com/Opus-Systems-OS/Iron-Fleet/tree/main",
+            "git@github.com:Opus-Systems-OS/Iron-Fleet.git",
+            "http://github.com/Opus-Systems-OS/Iron-Fleet",
         ] {
             assert!(!is_github_repo_url(bad), "{bad}");
         }
         let err = check_github(&GithubSpec {
             token_env: "T".into(),
-            mount: vec!["https://github.com/Opus1247/Iron-Fleet.git".into()],
+            mount: vec!["https://github.com/Opus-Systems-OS/Iron-Fleet.git".into()],
         })
         .unwrap_err();
         assert!(err.contains("github.mount"), "{err}");

@@ -23,7 +23,7 @@ services:
       - mcp-fleet
 
   control-plane:
-    image: ghcr.io/opus1247/iron-fleet/control-plane:latest
+    image: ghcr.io/opus-systems-os/iron-fleet/control-plane:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -35,7 +35,7 @@ services:
     # bash. `curl https://fleet.opustower.dev/healthz` through Caddy is the check.
 
   mcp-fleet:
-    image: ghcr.io/opus1247/iron-fleet/mcp-fleet:latest
+    image: ghcr.io/opus-systems-os/iron-fleet/mcp-fleet:latest
     restart: unless-stopped
     env_file: .env
     environment:

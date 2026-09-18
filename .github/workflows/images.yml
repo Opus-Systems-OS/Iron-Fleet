@@ -43,11 +43,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # GHCR wants a lowercase owner; github.repository_owner is "Opus1247".
+      # GHCR wants a lowercase owner; github.repository_owner is "Opus-Systems-OS".
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/opus1247/iron-fleet/${{ matrix.name }}
+          images: ghcr.io/opus-systems-os/iron-fleet/${{ matrix.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-

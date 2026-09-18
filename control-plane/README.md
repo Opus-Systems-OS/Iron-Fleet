@@ -151,7 +151,7 @@ verbatim `agent` body (so neither touches the agent's definition hash):
     "from_env": "BLUEWEB_GITHUB_TOKEN" }
 ],
 "github": { "token_env": "BLUEWEB_GITHUB_TOKEN",
-            "mount": ["https://github.com/Opus1247/Iron-Fleet"] }
+            "mount": ["https://github.com/Opus-Systems-OS/Iron-Fleet"] }
 ```
 
 **`credentials`** → one vault per agent (`agent_vaults`), one credential per
