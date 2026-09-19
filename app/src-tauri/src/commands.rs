@@ -178,6 +178,37 @@ pub async fn get_inference_models(state: State<'_, AppState>) -> Result<RigStatu
     }
 }
 
+/// Jarvis's voice: `POST /voice/speak` on the API, the mp3 bytes as
+/// base64 for the webview to play. Any failure — an API without voice
+/// (404), no credits, no network — is an `Err` the caller answers with the
+/// webview's own `speechSynthesis`, so a reply is always spoken.
+#[tauri::command]
+pub async fn speak(text: String, state: State<'_, AppState>) -> Result<String, String> {
+    let cfg = require_config(&state)?;
+    let resp = state
+        .http
+        .post(format!("{}/voice/speak", cfg.url))
+        .bearer_auth(&cfg.token)
+        .json(&serde_json::json!({ "text": text, "format": "mp3", "latency": "low" }))
+        .send()
+        .await
+        .map_err(|e| format!("could not reach {}: {e}", cfg.url))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        return Err(format!(
+            "{status}: {}",
+            body["error"]["message"].as_str().unwrap_or("voice unavailable")
+        ));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("voice download failed: {e}"))?;
+    use base64::Engine as _;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
 /// Start streaming `id`'s events to the webview as `session-event` /
 /// `session-stream-state` Tauri events, replacing whatever `slot` was
 /// watching before. Two slots exist: `"fleet"` follows the selected row on
