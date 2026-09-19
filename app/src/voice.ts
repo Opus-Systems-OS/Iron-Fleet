@@ -114,7 +114,7 @@ export class VoiceView {
         } else if (this.state === "idle") {
           this.caption.textContent = "Hold the orb (or Space) to talk";
         }
-        if (!this.synth) this.sessionLine.title = "no speechSynthesis in this webview — replies are text only";
+        if (!this.synth) this.sessionLine.title = "no speechSynthesis fallback in this webview";
       })
       .catch((err) => this.showError(String(err)));
   }
@@ -242,28 +242,69 @@ export class VoiceView {
   // ---- speaking ---------------------------------------------------------------
 
   private speak(text: string) {
-    if (!this.synth) return; // replies stay text-only in the transcript
     this.queue.push(text);
     if (!this.speaking) this.pump();
   }
 
-  private pump() {
+  /**
+   * One sentence at a time: Jarvis's own voice from the API (`speak`
+   * command → mp3), or the webview's `speechSynthesis` for a sentence the
+   * API cannot voice. Either way the next sentence waits for this one.
+   */
+  private async pump() {
     const next = this.queue.shift();
-    if (next === undefined || !this.synth) {
+    if (next === undefined) {
       this.speaking = false;
       if (!this.holding) this.setState(this.sessionRunning ? "thinking" : "idle");
       return;
     }
     this.speaking = true;
     this.setState("speaking", next);
-    const utterance = new SpeechSynthesisUtterance(next);
-    utterance.onend = () => this.pump();
-    utterance.onerror = () => this.pump();
-    this.synth.speak(utterance);
+    try {
+      const b64 = await invoke<string>("speak", { text: next });
+      await this.playClip(b64);
+    } catch {
+      await this.speakLocally(next);
+    }
+    void this.pump();
+  }
+
+  private audio: HTMLAudioElement | null = null;
+
+  private playClip(b64: string): Promise<void> {
+    return new Promise((resolve) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
+      const el = new Audio(url);
+      this.audio = el;
+      const done = () => {
+        URL.revokeObjectURL(url);
+        if (this.audio === el) this.audio = null;
+        resolve();
+      };
+      el.onended = done;
+      el.onerror = done;
+      el.play().catch(done);
+    });
+  }
+
+  private speakLocally(text: string): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.synth) return resolve(); // text-only webview
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.onend = () => resolve();
+      utterance.onerror = () => resolve();
+      this.synth.speak(utterance);
+    });
   }
 
   private stopSpeaking() {
     this.queue = [];
+    if (this.audio) {
+      this.audio.pause();
+      this.audio.src = "";
+      this.audio = null;
+    }
     if (this.synth?.speaking || this.synth?.pending) this.synth.cancel();
     this.speaking = false;
   }
