@@ -654,8 +654,22 @@ session continues across launches. Headset key `quest-3`
 (`89d4f0f9`, `sessions:*`, `fleet:read`, `voice`). Build/install from the
 Mac only (`WorkshopBuild.Apk` → `adb install -r`, launch with `-e
 opus.wit` once); the Wit token lives in `~/.config/opus-systems/wit-token`
-on the Mac and PlayerPrefs on the headset, nowhere else. Next there:
-nothing staged — ideas in its `docs/status.md`.
+on the Mac and PlayerPrefs on the headset, nowhere else.
+
+**Workshop upgrade — done 2026-09-20** (Quest `93037f2`…`3bba34d`, API
+#14, Iron-Fleet #36, Jarvis #3–#5): web search proven on `jarvis`
+(`agent_toolset_20260401` already had it); Apple Music from the headset —
+the Quest session declares the music tools with `client: "quest"`
+(control plane keeps it as `iron_fleet_client`), the Mac Jarvis app's
+`WorkshopRelay` answers them, the Music app's audio is captured with
+ScreenCaptureKit and streamed as PCM to a speaker panel (Mac muted
+meanwhile), and a media panel reads now-playing/artwork/controls from the
+Mac on port 48101; ray-canvas buttons on every panel; a calculator; and
+the Opus launcher on `GET /v1/ops` (scope `ops:read`) — GitHub,
+UptimeRobot, droplet, Docker (socket `:ro`), Tailscale, Cloudflare from
+read tokens in the droplet `.env`. Keys re-minted with `ops:read` (`mac`
+`7d26eb91`, `quest-3` `9c44f721`; old ones revoked). Next there: nothing
+staged — ideas in its `docs/status.md`.
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
