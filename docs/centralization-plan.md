@@ -640,7 +640,7 @@ Tauri app's Jarvis tab (#35), the native Swift app and the Quest app all
 speak with it, `speechSynthesis` / `AVSpeechSynthesizer` as fallback.
 Billed per character against the user's Fish credit.
 
-**Quest 3 app — stages 1–5 done on the device 2026-09-19.** Its own repo,
+**Quest 3 app — all six planned stages done on the device 2026-09-19.** Its own repo,
 `Opus-Systems-OS/Opus-Systems-OS-Quest` (Unity 6, Meta XR SDK 205, the C#
 SDK as a UPM git dependency; `CLAUDE.md` + `docs/status.md` there, which
 record every gotcha). Passthrough room, a grabbable jarvis panel bound to
@@ -648,12 +648,14 @@ a `jarvis` session over the API's WebSocket, a panel per *running* fleet
 session on a ring, a fleet header (rig line + session list); voice both
 ways (Meta Voice SDK dictation on a left-hand pinch → Wit.ai; replies in
 the Fish voice from the panel's position); spatial anchors keep the
-jarvis panel and header where they were left. Headset key `quest-3`
+jarvis panel and header where they were left; STL/GLB print previews on a
+stand via jarvis session tools (`list_models`, `show_model`); the jarvis
+session continues across launches. Headset key `quest-3`
 (`89d4f0f9`, `sessions:*`, `fleet:read`, `voice`). Build/install from the
 Mac only (`WorkshopBuild.Apk` → `adb install -r`, launch with `-e
 opus.wit` once); the Wit token lives in `~/.config/opus-systems/wit-token`
 on the Mac and PlayerPrefs on the headset, nowhere else. Next there:
-stage 6, the 3D-print preview panel.
+nothing staged — ideas in its `docs/status.md`.
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
