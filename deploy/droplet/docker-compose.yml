@@ -62,6 +62,9 @@ services:
       CONTROL_PLANE_URL: http://control-plane:8080
     volumes:
       - api_data:/data
+      # The ops panel's Docker row: the engine socket, read-only. The API
+      # only ever GETs /containers/json over it.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - control-plane
 

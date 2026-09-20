@@ -54,6 +54,11 @@ pub struct CreateRequest {
     /// blank line. At most 4 000 characters.
     #[serde(default)]
     pub system_suffix: Option<String>,
+    /// Which client started the session (`quest`, `mac`, `tauri`), kept as
+    /// metadata `iron_fleet_client` so another device can find it — the
+    /// Mac answers the headset's music tools this way. `[a-z0-9-]`, ≤ 32.
+    #[serde(default)]
+    pub client: Option<String>,
 }
 
 const SYSTEM_SUFFIX_MAX_CHARS: usize = 4_000;
@@ -176,10 +181,7 @@ pub async fn create(
         title: Some(title_from(task)),
         budget: Budget::limit(agent.max_list_cost_cents),
         initial_events: vec![SessionEvent::text(task)],
-        metadata: BTreeMap::from([
-            ("iron_fleet_agent".to_owned(), agent.slug.clone()),
-            ("iron_fleet_environment".to_owned(), env_slug.clone()),
-        ]),
+        metadata: session_metadata(&agent.slug, &env_slug, req.client.as_deref())?,
         vault_ids,
         resources,
     };
@@ -588,9 +590,48 @@ fn title_from(task: &str) -> String {
     t
 }
 
+/// The metadata every fleet session carries, plus the client label when
+/// the caller gave one.
+fn session_metadata(
+    agent_slug: &str,
+    env_slug: &str,
+    client: Option<&str>,
+) -> Result<BTreeMap<String, String>, Error> {
+    let mut m = BTreeMap::from([
+        ("iron_fleet_agent".to_owned(), agent_slug.to_owned()),
+        ("iron_fleet_environment".to_owned(), env_slug.to_owned()),
+    ]);
+    if let Some(client) = client {
+        if client.is_empty()
+            || client.len() > 32
+            || !client
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            return Err(Error::InvalidRequest(
+                "client must be 1-32 chars of [a-z0-9-]".into(),
+            ));
+        }
+        m.insert("iron_fleet_client".to_owned(), client.to_owned());
+    }
+    Ok(m)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_label_lands_in_metadata_and_is_validated() {
+        let m = session_metadata("jarvis", "cloud-default", Some("quest")).unwrap();
+        assert_eq!(m["iron_fleet_client"], "quest");
+        assert_eq!(m["iron_fleet_agent"], "jarvis");
+        assert!(!session_metadata("jarvis", "cloud-default", None)
+            .unwrap()
+            .contains_key("iron_fleet_client"));
+        assert!(session_metadata("jarvis", "cloud-default", Some("Quest 3!")).is_err());
+        assert!(session_metadata("jarvis", "cloud-default", Some("")).is_err());
+    }
 
     #[test]
     fn console_url_is_the_documented_format() {
