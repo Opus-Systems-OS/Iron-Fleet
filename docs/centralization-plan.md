@@ -668,8 +668,18 @@ Mac on port 48101; ray-canvas buttons on every panel; a calculator; and
 the Opus launcher on `GET /v1/ops` (scope `ops:read`) — GitHub,
 UptimeRobot, droplet, Docker (socket `:ro`), Tailscale, Cloudflare from
 read tokens in the droplet `.env`. Keys re-minted with `ops:read` (`mac`
-`7d26eb91`, `quest-3` `9c44f721`; old ones revoked). Next there: nothing
-staged — ideas in its `docs/status.md`.
+`7d26eb91`, `quest-3` `9c44f721`; old ones revoked).
+
+**Standalone — done 2026-09-20** (Quest `ec0775f`…`2182e0e`, API #15–#16,
+Jarvis #6): Quest-home-style window management (title bars, ray
+push/pull, face-me, ×, hub Desk row, reset room); **pairing** —
+`POST /v1/pair` shows a code on a keyless headset, the Mac's Jarvis app
+approves it (scope `pair:approve` on the `mac` key, now `fb95b84b`),
+the device key is minted with the fixed profile and older ones of that
+name revoked (`quest-3` rotates on every pairing); a release-signed
+build (keystore in `~/.config/opus-systems/`, never in a repo) with an
+icon and a commit-count version. No adb in normal use any more. Next
+there: nothing staged — ideas in its `docs/status.md`.
 
 **A new machine needs** (on the Mac the checkout is `~/code/Iron-Fleet` —
 never under `~/Documents`, which is iCloud Drive; see the Phase 4 note):
