@@ -255,7 +255,85 @@ pub fn load_dir(dir: &Path) -> Result<Registry> {
             reason: "no agent definitions found".into(),
         });
     }
+    // Rosters name other agents, so they are checked once every file is in.
+    for (slug, file) in &reg.agents {
+        if let Err(reason) = check_roster(slug, file, &reg.agents) {
+            return Err(Error::Registry {
+                path: dir.join(format!("{slug}.json")),
+                reason,
+            });
+        }
+    }
     Ok(reg)
+}
+
+/// The roster key that names a member in `agents/` — rewritten to the
+/// member's synced `id` + `version` by `sync::resolve_roster`.
+pub const ROSTER_SLUG_KEY: &str = "slug";
+/// Anthropic's limit on unique agents in `multiagent.agents`.
+pub const ROSTER_MAX_AGENTS: usize = 20;
+
+/// A roster must be a coordinator block whose `agent` members are named by
+/// slug (the fleet stays reproducible: ids are Anthropic's, slugs are ours),
+/// exist in `agents/`, and have no roster of their own — Anthropic allows
+/// one level of delegation and rejects the rest at create time; failing at
+/// load time says which file is wrong. `self` and `advisor` entries pass
+/// through.
+fn check_roster(
+    slug: &str,
+    file: &AgentFile,
+    agents: &BTreeMap<String, AgentFile>,
+) -> std::result::Result<(), String> {
+    let Some(multi) = &file.agent.multiagent else {
+        return Ok(());
+    };
+    if multi.get("type").and_then(Value::as_str) != Some("coordinator") {
+        return Err(r#"agent.multiagent.type must be "coordinator""#.into());
+    }
+    let entries = multi
+        .get("agents")
+        .and_then(Value::as_array)
+        .ok_or("agent.multiagent.agents must be an array")?;
+    if entries.is_empty() || entries.len() > ROSTER_MAX_AGENTS {
+        return Err(format!(
+            "agent.multiagent.agents must list 1 to {ROSTER_MAX_AGENTS} agents"
+        ));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in entries {
+        match entry.get("type").and_then(Value::as_str) {
+            Some("agent") => {
+                if entry.get("id").is_some() {
+                    return Err(format!(
+                        "roster entries name members by `{ROSTER_SLUG_KEY}`, not `id`: {entry}"
+                    ));
+                }
+                let member = entry
+                    .get(ROSTER_SLUG_KEY)
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| format!("roster entry needs a `{ROSTER_SLUG_KEY}`: {entry}"))?;
+                if member == slug {
+                    return Err(
+                        r#"a coordinator lists itself as {"type": "self"}, not by slug"#.into(),
+                    );
+                }
+                let Some(member_file) = agents.get(member) else {
+                    return Err(format!("roster member `{member}` has no file in agents/"));
+                };
+                if member_file.agent.multiagent.is_some() {
+                    return Err(format!(
+                        "roster member `{member}` is itself a coordinator; delegation is one level deep"
+                    ));
+                }
+                if !seen.insert(member) {
+                    return Err(format!("roster lists `{member}` twice"));
+                }
+            }
+            Some("self") | Some("advisor") => {}
+            _ => return Err(format!("unknown roster entry: {entry}")),
+        }
+    }
+    Ok(())
 }
 
 fn json_files(dir: &Path) -> Result<Vec<PathBuf>> {
@@ -637,6 +715,121 @@ mod tests {
             .find(|t| t["type"] == "mcp_toolset")
             .expect("jarvis declares a matching mcp_toolset entry");
         assert_eq!(toolset["mcp_server_name"], "fleet");
+    }
+
+    /// A scratch `agents/` with cloud-default and one file per `(slug, multiagent)`.
+    fn scratch_roster_dir(tag: &str, agents: &[(&str, Option<serde_json::Value>)]) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("iron-fleet-roster-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("environments")).unwrap();
+        std::fs::copy(
+            repo_agents_dir().join("environments/cloud-default.json"),
+            dir.join("environments/cloud-default.json"),
+        )
+        .unwrap();
+        for (slug, multi) in agents {
+            let mut agent = serde_json::json!({
+                "name": slug,
+                "model": {"id": "claude-sonnet-5"},
+                "tools": [{"type": "agent_toolset_20260401"}]
+            });
+            if let Some(m) = multi {
+                agent["multiagent"] = m.clone();
+            }
+            let file = serde_json::json!({
+                "slug": slug,
+                "default_environment": "cloud-default",
+                "policy": {"max_list_cost_cents": "100"},
+                "agent": agent
+            });
+            std::fs::write(dir.join(format!("{slug}.json")), file.to_string()).unwrap();
+        }
+        dir
+    }
+
+    fn roster(entries: serde_json::Value) -> Option<serde_json::Value> {
+        Some(serde_json::json!({"type": "coordinator", "agents": entries}))
+    }
+
+    #[test]
+    fn a_roster_names_members_by_slug_and_loads() {
+        let dir = scratch_roster_dir(
+            "ok",
+            &[
+                ("designer", None),
+                ("programmer", None),
+                (
+                    "director",
+                    roster(serde_json::json!([
+                        {"type": "agent", "slug": "designer"},
+                        {"type": "agent", "slug": "programmer"},
+                        {"type": "self"}
+                    ])),
+                ),
+            ],
+        );
+        let reg = load_dir(&dir).unwrap();
+        assert!(reg.agents["director"].agent.multiagent.is_some());
+        assert!(reg.agents["designer"].agent.multiagent.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bad_rosters_are_load_errors_naming_the_coordinator() {
+        let cases: Vec<(&str, Option<serde_json::Value>, &str)> = vec![
+            (
+                "missing",
+                roster(serde_json::json!([{"type": "agent", "slug": "nobody"}])),
+                "no file in agents/",
+            ),
+            (
+                "by-id",
+                roster(serde_json::json!([{"type": "agent", "id": "agent_01X"}])),
+                "not `id`",
+            ),
+            (
+                "self-slug",
+                roster(serde_json::json!([{"type": "agent", "slug": "director"}])),
+                "lists itself",
+            ),
+            (
+                "twice",
+                roster(serde_json::json!([
+                    {"type": "agent", "slug": "designer"},
+                    {"type": "agent", "slug": "designer"}
+                ])),
+                "twice",
+            ),
+            ("empty", roster(serde_json::json!([])), "1 to 20"),
+            (
+                "not-coordinator",
+                Some(serde_json::json!({"type": "worker", "agents": []})),
+                "coordinator",
+            ),
+            (
+                "nested",
+                roster(serde_json::json!([{"type": "agent", "slug": "lead"}])),
+                "one level deep",
+            ),
+        ];
+        for (tag, multi, needle) in cases {
+            let dir = scratch_roster_dir(
+                tag,
+                &[
+                    ("designer", None),
+                    (
+                        "lead",
+                        roster(serde_json::json!([{"type": "agent", "slug": "designer"}])),
+                    ),
+                    ("director", multi),
+                ],
+            );
+            let err = load_dir(&dir).unwrap_err().to_string();
+            assert!(err.contains(needle), "{tag}: {err}");
+            assert!(err.contains("director.json"), "{tag}: {err}");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     #[test]

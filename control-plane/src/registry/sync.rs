@@ -12,11 +12,13 @@
 //!   pinned into agent definitions (`resolve_skills`).
 //! - Agents: created if unknown, updated (new version) if the definition hash
 //!   changed, otherwise untouched. Policy columns are refreshed every run.
+//!   Coordinators go last, with their rosters pinned to the members' synced
+//!   versions (`resolve_roster`), so a member's roll rolls its coordinator.
 //! - Credentials: after agents (the vault row references the agent row) —
 //!   see `registry::credentials`.
 
 use super::credentials::{self, CredentialReport};
-use super::{repo_skill_ref, Registry, SKILL_REF_KEY, SLUG_METADATA_KEY};
+use super::{repo_skill_ref, Registry, ROSTER_SLUG_KEY, SKILL_REF_KEY, SLUG_METADATA_KEY};
 use crate::anthropic::types::AgentDefinition;
 use crate::anthropic::Client;
 use crate::db::{AgentGithubRow, AgentRow, Db, SkillRow};
@@ -117,8 +119,13 @@ pub async fn sync(reg: &Registry, api: &Client, db: &Db) -> Result<SyncReport> {
         synced_skills.insert(name.clone(), (skill_id, version_id));
     }
 
-    for (slug, file) in &reg.agents {
+    // slug -> (agent_id, version) for everything synced so far; coordinators
+    // come last so their rosters can be pinned to what this run produced.
+    let mut synced_agents: BTreeMap<String, (String, u32)> = BTreeMap::new();
+    for slug in sync_order(reg) {
+        let file = &reg.agents[slug];
         let agent_def = resolve_skills(&file.agent, &synced_skills)?;
+        let agent_def = resolve_roster(&agent_def, &synced_agents)?;
         let hash = definition_hash(&agent_def)?;
         let effort = file
             .agent
@@ -148,6 +155,7 @@ pub async fn sync(reg: &Registry, api: &Client, db: &Db) -> Result<SyncReport> {
             }
         };
 
+        synced_agents.insert(slug.clone(), (agent_id.clone(), version));
         db.upsert_agent(&AgentRow {
             slug: slug.clone(),
             agent_id,
@@ -202,6 +210,54 @@ fn resolve_skills(
     Ok(out)
 }
 
+/// Every agent without a roster first (in slug order), then the
+/// coordinators. Rosters are one level deep (`registry::check_roster`), so
+/// by the time a coordinator is synced every member it names has an id and
+/// the version this run left it at.
+fn sync_order(reg: &Registry) -> Vec<&String> {
+    let (coordinators, members): (Vec<_>, Vec<_>) = reg
+        .agents
+        .iter()
+        .partition(|(_, f)| f.agent.multiagent.is_some());
+    members
+        .into_iter()
+        .chain(coordinators)
+        .map(|(slug, _)| slug)
+        .collect()
+}
+
+/// Rewrite roster entries `{"type": "agent", "slug": "<slug>"}` to the wire
+/// form `{"type": "agent", "id": …, "version": …}`, pinned to what this sync
+/// just produced for that member. Pinning puts the member's version inside
+/// the coordinator's definition hash: a member that rolls to a new version
+/// rolls its coordinator on the same run, so the roster never lags (the
+/// docs: a roster is snapshotted when the coordinator is saved). Other
+/// entries (`self`, `advisor`) pass through.
+fn resolve_roster(
+    def: &AgentDefinition,
+    synced: &BTreeMap<String, (String, u32)>,
+) -> Result<AgentDefinition> {
+    let mut out = def.clone();
+    let Some(entries) = out
+        .multiagent
+        .as_mut()
+        .and_then(|m| m.get_mut("agents"))
+        .and_then(|a| a.as_array_mut())
+    else {
+        return Ok(out);
+    };
+    for entry in entries {
+        let Some(slug) = entry.get(ROSTER_SLUG_KEY).and_then(|s| s.as_str()) else {
+            continue;
+        };
+        let (id, version) = synced.get(slug).ok_or_else(|| {
+            Error::Config(format!("roster member `{slug}` referenced but not synced"))
+        })?;
+        *entry = json!({"type": "agent", "id": id, "version": version});
+    }
+    Ok(out)
+}
+
 /// Hash of the canonical (serde, BTreeMap-ordered) JSON of the agent body.
 fn definition_hash(def: &crate::anthropic::types::AgentDefinition) -> Result<String> {
     let value = serde_json::to_value(def).map_err(|e| Error::Config(e.to_string()))?;
@@ -236,6 +292,87 @@ mod tests {
         .unwrap();
         assert_eq!(definition_hash(&a).unwrap(), definition_hash(&b).unwrap());
         assert_ne!(definition_hash(&a).unwrap(), definition_hash(&c).unwrap());
+    }
+
+    fn agent_file(slug: &str, multiagent: Option<serde_json::Value>) -> crate::registry::AgentFile {
+        serde_json::from_value(json!({
+            "slug": slug,
+            "default_environment": "cloud-default",
+            "policy": {"max_list_cost_cents": "100"},
+            "agent": {
+                "name": slug,
+                "model": {"id": "claude-opus-5-5"},
+                "multiagent": multiagent,
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn coordinators_sync_after_their_members() {
+        let mut reg = Registry::default();
+        let roster = json!({"type": "coordinator", "agents": [
+            {"type": "agent", "slug": "roblox-designer"},
+            {"type": "agent", "slug": "roblox-programmer"}
+        ]});
+        // Alphabetically the director would come before the programmer.
+        for (slug, multi) in [
+            ("roblox-designer", None),
+            ("roblox-director", Some(roster)),
+            ("roblox-programmer", None),
+            ("jarvis", None),
+        ] {
+            reg.agents.insert(slug.to_owned(), agent_file(slug, multi));
+        }
+        let order: Vec<&str> = sync_order(&reg).into_iter().map(String::as_str).collect();
+        assert_eq!(
+            order,
+            [
+                "jarvis",
+                "roblox-designer",
+                "roblox-programmer",
+                "roblox-director"
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_roster_pins_members_and_a_member_roll_rolls_the_coordinator() {
+        let file = agent_file(
+            "director",
+            Some(json!({"type": "coordinator", "agents": [
+                {"type": "agent", "slug": "designer"},
+                {"type": "self"}
+            ]})),
+        );
+        let mut synced = BTreeMap::from([("designer".to_owned(), ("agent_01D".to_owned(), 3))]);
+
+        let v3 = resolve_roster(&file.agent, &synced).unwrap();
+        assert_eq!(
+            v3.multiagent.as_ref().unwrap()["agents"],
+            json!([{"type": "agent", "id": "agent_01D", "version": 3}, {"type": "self"}])
+        );
+
+        synced.insert("designer".to_owned(), ("agent_01D".to_owned(), 4));
+        let v4 = resolve_roster(&file.agent, &synced).unwrap();
+        assert_ne!(
+            definition_hash(&v3).unwrap(),
+            definition_hash(&v4).unwrap(),
+            "a member's new version must change the coordinator's hash"
+        );
+
+        // Agents without a roster are untouched, and serialise without the key
+        // (the pre-roster fleet keeps its hashes).
+        let plain = agent_file("jarvis", None);
+        let out = resolve_roster(&plain.agent, &synced).unwrap();
+        assert!(serde_json::to_value(&out)
+            .unwrap()
+            .get("multiagent")
+            .is_none());
+
+        // A member missing from this run is a bug, not a silent skip.
+        let err = resolve_roster(&file.agent, &BTreeMap::new()).unwrap_err();
+        assert!(err.to_string().contains("designer"));
     }
 
     #[test]
