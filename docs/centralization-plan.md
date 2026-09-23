@@ -584,7 +584,7 @@ not yet** (the redirect covers it until someone runs
 `git remote set-url origin https://github.com/Opus-Systems-OS/Iron-Fleet.git`
 there).
 
-**Opus Systems OS API — stages 1–3, 5a, 5b live 2026-09-18; stage 4's Windows half parked in the rig backlog.** Its own
+**Opus Systems OS API — all five stages live; stage 4 closed 2026-09-22.** Its own
 repo, `Opus-Systems-OS/Opus-Systems-OS-API` (Rust/axum gateway; plan,
 contract and "resume here" in that repo's `CLAUDE.md`, `docs/api-design.md`,
 `docs/status.md`). Runs on this droplet as the `api` compose service
@@ -596,11 +596,10 @@ moved the native Jarvis Swift app onto it — which is why the control plane
 gained session-local custom tools + `system_suffix` (`agent_with_overrides`,
 #33) and `POST /sessions/{id}/tool-results`. The Mac desktop app is on the
 API with a device key (#30). It is the
-front door for every client from here on; `fleet.opustower.dev` stays
-client-facing until the API's stage 4, after which Caddy will expose only
-the webhook there. Gotcha: the Caddyfile is a single-file bind mount —
-`git pull` replaces the inode, `caddy reload` reports "config is
-unchanged" — after any Caddyfile change run
+front door for every client: since 2026-09-22 `fleet.opustower.dev`
+serves only `/webhooks/*` and `/healthz` (#37). Gotcha: the Caddyfile is a
+single-file bind mount — `git pull` replaces the inode and `caddy reload`
+reports "config is unchanged", so after any Caddyfile change run
 `docker compose up -d --force-recreate caddy`.
 
 **Desktop clients — the Mac, as of 2026-09-20.** Two apps, both in
@@ -657,6 +656,23 @@ eleasepp.exe`). Verified with the new key: `/v1/me` →
    `/v1/usage` → 200; and with the app running, Caddy's `access-api.log`
    shows its 5 s `fleet/agents` + `sessions` + `rig` poll at 200, stopping
    when the app is killed. `mac`'s key is no longer shared with this box.
+
+4. ~~Caddy narrowed~~ — PR #37, merged as `36b54bb` and deployed
+   2026-09-22 ~21:28 PDT (04:28 UTC): `git pull` on the droplet, then
+   `docker compose up -d --force-recreate caddy` (the single-file bind
+   mount again — the running container kept the old inode until the
+   recreate, and `caddy validate` inside it read the old file too).
+   `fleet.opustower.dev` now proxies `/webhooks/*` and `/healthz` only.
+   Verified from the rig: `/healthz` 200, `/agents` `/sessions` `/usage`
+   404 (GET and POST), `GET /webhooks/managed-agents` **405** and an
+   unsigned POST **400** — i.e. the route still reaches the control
+   plane, which then rejects the signature (`webhook signature rejected:
+   missing webhook-id` in its log at 04:29:21 UTC, this test).
+   HTTP→HTTPS still 308; `mcp.opustower.dev/healthz` and
+   `api.opustower.dev/v1/health` 200 throughout; `api` and `mcp-fleet`
+   untouched. The next real `session.status_idled` from Anthropic is the
+   last unforced proof. **That closes the API's stage 4** — no laptop
+   holds `CONTROL_PLANE_TOKEN` as a client credential any more.
 
 Noticed while verifying: the rig reaches `api.opustower.dev` over **IPv6**
 (`2604:a880:400:d1:0:4:f807:7001`), and Docker proxies IPv6 connections to a
