@@ -178,6 +178,11 @@ pub struct AgentRef {
     pub tools: Option<Vec<Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<String>,
+    /// `{"id": "<model>"}`. Replaces the agent's `model` object in full, so
+    /// the agent's `effort` does not carry over: the session runs at the
+    /// model's default effort (verified 2026-09-23 — Sonnet 5 → `high`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<Value>,
 }
 
 impl AgentRef {
@@ -188,6 +193,7 @@ impl AgentRef {
             version,
             tools: None,
             system: None,
+            model: None,
         }
     }
 
@@ -196,6 +202,7 @@ impl AgentRef {
         version: u32,
         tools: Option<Vec<Value>>,
         system: Option<String>,
+        model: Option<&str>,
     ) -> Self {
         AgentRef {
             kind: "agent_with_overrides",
@@ -203,6 +210,7 @@ impl AgentRef {
             version,
             tools,
             system,
+            model: model.map(|m| serde_json::json!({ "id": m })),
         }
     }
 }

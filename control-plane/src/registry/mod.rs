@@ -595,7 +595,9 @@ mod tests {
         let reg = load_dir(&repo_agents_dir()).unwrap();
         let cap = |s: &str| reg.agents[s].policy.max_list_cost_cents.get();
         let effort = |s: &str| reg.agents[s].agent.model.effort.unwrap().as_str();
-        assert_eq!((cap("jarvis"), effort("jarvis")), (50, "low"));
+        assert_eq!((cap("jarvis"), effort("jarvis")), (200, "medium"));
+        assert_eq!(reg.agents["jarvis"].default_environment, "jarvis-lab");
+        assert_eq!(reg.environments["jarvis-lab"].kind().unwrap(), "cloud");
         assert_eq!(
             (cap("blueweb-client"), effort("blueweb-client")),
             (1000, "high")

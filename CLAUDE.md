@@ -51,7 +51,7 @@ finishes, so final cost lands slightly over.
 
 | Agent | Per-session cap | Effort | Notes |
 |---|---|---|---|
-| `jarvis` | `"50"` | low | Short, high-frequency; must never surprise |
+| `jarvis` | `"200"` | medium | Voice-first; real work in its `jarvis-lab` sandbox (repos, web, headless browser); must never surprise |
 | `blueweb-client` | `"1000"` | high | Billable client code work |
 | `blueweb-ops` | `"200"` | medium | Contracts, admin; no code tools |
 | `gpu-compute` | `"500"` | medium | Runs on `rig-gpu` |
@@ -106,7 +106,9 @@ reproducible and diffable.
   sets these automatically; hand-rolled requests must not forget them.
 - Agent first, then session. The session's `agent` field is a pinned
   `{type: "agent", id, version}` — or, only when a client adds session-local
-  custom tools or a system suffix, `{type: "agent_with_overrides", …}` built
+  custom tools, a system suffix, or picks another model from the control
+  plane's `SESSION_MODELS` (that session then runs at the model's default
+  effort), `{type: "agent_with_overrides", …}` built
   by the control plane on the agent's *live* definition (an override
   replaces the field in full). Overrides never touch the agent resource;
   `agents/` remains the only place the fleet is defined.

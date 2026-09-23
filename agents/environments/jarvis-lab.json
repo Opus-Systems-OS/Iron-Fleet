@@ -1,0 +1,14 @@
+{
+  "slug": "jarvis-lab",
+  "environment": {
+    "name": "jarvis-lab",
+    "config": {
+      "type": "cloud",
+      "networking": { "type": "unrestricted" },
+      "packages": {
+        "apt": ["gh", "jq"],
+        "pip": ["playwright"]
+      }
+    }
+  }
+}
