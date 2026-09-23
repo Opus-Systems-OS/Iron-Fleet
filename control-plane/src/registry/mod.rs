@@ -675,6 +675,11 @@ mod tests {
         let effort = |s: &str| reg.agents[s].agent.model.effort.unwrap().as_str();
         assert_eq!((cap("jarvis"), effort("jarvis")), (200, "medium"));
         assert_eq!(reg.agents["jarvis"].default_environment, "jarvis-lab");
+        // Read-only token: repo mounts + `gh` on api.github.com, nothing else.
+        let gh = reg.agents["jarvis"].github.as_ref().expect("jarvis mounts the org");
+        assert_eq!(gh.token_env, "JARVIS_GITHUB_READ_TOKEN");
+        assert!(gh.mount.iter().any(|m| m.ends_with("/Jarvis")));
+        assert!(gh.mount.iter().all(|m| is_github_repo_url(m)));
         assert_eq!(reg.environments["jarvis-lab"].kind().unwrap(), "cloud");
         assert_eq!(
             (cap("blueweb-client"), effort("blueweb-client")),
@@ -1010,11 +1015,17 @@ mod tests {
             reg.environments["blueweb-web"].environment.config["packages"]["apt"],
             serde_json::json!(["gh"])
         );
-        // Only the agent that needs them: no secret or mount leaks to the rest.
-        for slug in ["jarvis", "blueweb-ops", "gpu-compute"] {
+        // Only the agents that need them: no secret or mount leaks to the rest.
+        for slug in ["blueweb-ops", "gpu-compute"] {
             assert!(reg.agents[slug].credentials.is_empty(), "{slug}");
             assert!(reg.agents[slug].github.is_none(), "{slug}");
         }
+        // jarvis holds exactly one secret — the org read token, as GH_TOKEN on
+        // api.github.com — never blueweb's write token.
+        let jc = &reg.agents["jarvis"].credentials;
+        assert_eq!(jc.len(), 1);
+        assert_eq!(jc[0].key(), "GH_TOKEN");
+        assert_eq!(jc[0].env_var(), "JARVIS_GITHUB_READ_TOKEN");
         // The token itself is never in a registry file.
         for file in json_files(&repo_agents_dir()).unwrap() {
             let text = std::fs::read_to_string(&file).unwrap();
