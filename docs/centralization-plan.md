@@ -19,6 +19,49 @@ Written for whichever machine picks this up next (Claude memory does not
 travel between machines; this section does). Everything below is verified
 fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–5 are complete.
 
+**J.A.R.V.I.S. on the web: stage 1 live 2026-09-23 ~17:20 UTC.** The web client is
+the repo `Opus-Systems-OS/J.A.R.V.I.S-Web` (**public**; Mac checkout
+`~/code/J.A.R.V.I.S-Web`) at `https://jarvis.opustower.dev`. It is the `jarvis-web`
+compose service (#39), and Caddy terminates its TLS.
+
+How it works:
+- **Server.** `jarvis-web` is a Rust/axum password gate and backend-for-frontend.
+  - An Argon2id unlock sets a `__Host-jw` cookie.
+  - `/bff/v1/*` is an allowlisted passthrough to the API using the site's own key,
+    `web` `2e307b48`. `keys` and `pair` are never reachable.
+  - It serves a Vite+TS page that is locked on every load.
+- **Its `.env`.** The service gets only `WEB_API_KEY` and `JARVIS_WEB_PASSWORD_HASH`
+  (single-quoted, because the hash contains `$`). There is no `env_file`.
+- **Setting the passphrase.** The user sets it with
+  `jarvis-web hash-password`, run in their own terminal; the `!` prefix has no TTY.
+  Only the hash exists anywhere.
+
+Live exit test:
+- `healthz` 200.
+- Without an unlock, `/bff` returns 401 and nothing reaches the API.
+- Without `x-jarvis`, the unlock returns 403.
+- Wrong passwords get 401 five times, then 429. This was run from the droplet so the
+  user's IP was not locked out.
+- No credential-shaped string is in the live JS.
+- Caddy's access log has no request bodies.
+- The user unlocked it in a browser: the HUD loaded with the link chip OK.
+
+Stage 0 spikes (6 ¢):
+- A per-session `model` override works but runs at the model's *default* effort.
+- In the cloud sandbox, apt `chromium` is only a snap stub. pip `playwright`'s bundled
+  Chromium works, with `ignore_https_errors=True` because the sandbox intercepts TLS.
+
+The plan (stages 2–5 plus Track R, the Roblox dev team) is in that repo's README
+"Build order" and in these notes. Next is Track R, then stage 2.
+
+The Roblox dev team (Track R, decided 2026-09-23):
+- Agents: `roblox-director` (Sonnet 5, coordinator), with `roblox-designer` and
+  `roblox-programmer` (both Opus 5.5) on its multiagent roster.
+- Budget: `"1000"` per session, shared by all threads.
+- Output: PRs to a new private game repo, plus publishing to a dedicated *test*
+  experience via an Open Cloud key scoped to that experience only.
+- Dispatch: `mcp-fleet`'s `start_session`, so Jarvis can start it.
+
 **Mac app repointed** — done 2026-09-15 ~05:25 UTC on the Mac. `url` in
 `~/Library/Application Support/com.ironfleet.app/control-plane.json`
 changed to `https://fleet.opustower.dev`, token untouched (the Railway
