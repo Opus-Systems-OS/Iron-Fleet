@@ -112,6 +112,10 @@ reproducible and diffable.
   by the control plane on the agent's *live* definition (an override
   replaces the field in full). Overrides never touch the agent resource;
   `agents/` remains the only place the fleet is defined.
+- A coordinator's `multiagent` roster (beta) names members **by slug**
+  (`{"type": "agent", "slug": "…"}`), never by id. Boot sync syncs the members
+  first and pins each one to its synced `{id, version}`, so a member's new
+  version rolls its coordinator on the same run. Delegation is one level deep.
 - Secrets live in the host's secret store and the rig's environment key stays on
   the rig. Never commit an API key, environment key, or GitHub token.
 

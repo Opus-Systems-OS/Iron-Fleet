@@ -67,6 +67,16 @@ pub struct AgentDefinition {
     pub skills: Vec<Value>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
+    /// A coordinator's roster (docs: managed-agents/multiagent-orchestration):
+    /// `{"type": "coordinator", "agents": [...]}`. In `agents/` a member is
+    /// named by slug — `{"type": "agent", "slug": "roblox-designer"}` — and
+    /// sync pins it to that member's synced `id` + `version`
+    /// (`sync::resolve_roster`). Omitted, not `[]`, when absent: the four
+    /// agents that predate rosters keep their definition hash. Removing a
+    /// roster from a live coordinator therefore needs an explicit update to
+    /// `"multiagent": null` on Anthropic's side; sync never does it silently.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multiagent: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
