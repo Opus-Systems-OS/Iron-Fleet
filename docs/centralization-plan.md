@@ -631,32 +631,45 @@ headset builds come from here unless that keystore is copied.
 `jarvis-mac` `50672da1` is no longer used by anything (the native app took
 the `mac` key when it gained pairing) — revoke it when convenient.
 
-**Rig backlog — do these next time at the Windows rig** (parked
-2026-09-18, still open 2026-09-22; nothing here blocks Mac-side work, and
-the shared control-plane token keeps the Windows app working until then):
+**Rig backlog — worked at the Windows rig 2026-09-22** (parked
+2026-09-18). Items 1–3 done and verified; item 4 below:
 
-1. Docker Desktop → Settings → General → "Start Docker Desktop when you
-   sign in" (the `rig-gpu` worker container needs it to survive a reboot).
-2. In the rig's Iron-Fleet checkout:
-   `git remote set-url origin https://github.com/Opus-Systems-OS/Iron-Fleet.git`,
-   then `git pull`. (The org move and everything since — ops, pairing,
-   the client label — is upstream.)
-3. Mint the rig's own API key from the Mac and stop sharing `mac`'s:
-   `ssh root@198.199.66.109 "cd /opt/iron-fleet/deploy/droplet && docker compose exec -T api opus-api keys create --name win-rig --scopes fleet:read,sessions:read,sessions:write,usage:read,inference,ops:read"`
-   and put it, with `url` `https://api.opustower.dev/v1`, in
-   `%APPDATA%\com.ironfleet.app\control-plane.json`. Rebuild the app
-   (`npm run tauri build -- --no-bundle`, binary in
-   `target.nosync\release\app.exe`). Fleet tab should show the four
-   agents and the Rig line.
-4. Only then narrow Caddy: `fleet.opustower.dev` serves `/webhooks/*` and
-   `/healthz` only (everything else 404), and the shared
-   `CONTROL_PLANE_TOKEN` stops being on any laptop. That closes the API's
-   stage 4.
+1. ~~Docker Desktop autostart~~ — already on: `AutoStart: true` in
+   `%APPDATA%\Docker\settings-store.json` plus a `Docker Desktop` entry
+   under `HKCU:\…\CurrentVersion\Run`, and `sdk-worker-1` is up with
+   `restart=unless-stopped`, so the `rig-gpu` worker survives a reboot.
+2. ~~Remote and pull~~ — the rig's `origin` is now
+   `https://github.com/Opus-Systems-OS/Iron-Fleet.git`; the checkout was 25
+   commits behind and fast-forwarded to `b860ac2`.
+3. ~~The rig's own key~~ — `win-rig` **`28033876`**, scopes
+   `fleet:read,sessions:read,sessions:write,usage:read,inference,voice,ops:read`.
+   `voice` is added to the parked list (the Jarvis tab speaks through `POST
+   /voice/speak` since #35, which postdates it); `pair:approve` is not — that
+   is the Mac's workshop role. Minted over SSH **from the rig itself** with
+   its `droplet` key, not from the Mac. `%APPDATA%\com.ironfleet.app\control-plane.json`
+   now holds `url` `https://api.opustower.dev/v1` and that key; the old file
+   is beside it as `.control-plane.bak`. App rebuilt at `b860ac2`
+   (`npm run tauri build -- --no-bundle`, 1m46s, binary in
+   `target.nosync
+eleasepp.exe`). Verified with the new key: `/v1/me` →
+   `win-rig` with those scopes, `/v1/fleet/agents` → the four agents,
+   `/v1/rig` → `online: true` with `nomic-embed-text:latest, qwen3:8b`,
+   `/v1/usage` → 200; and with the app running, Caddy's `access-api.log`
+   shows its 5 s `fleet/agents` + `sessions` + `rig` poll at 200, stopping
+   when the app is killed. `mac`'s key is no longer shared with this box.
 
-Optional, once those are done: Ollama is already reachable over Tailscale
-(`INFERENCE_URL`), so nothing else is needed for local inference; and if
-the rig should also serve the workshop's music when the Mac is away, that
-is a WASAPI-loopback port of `MusicStreamer`, not a rebuild.
+Noticed while verifying: the rig reaches `api.opustower.dev` over **IPv6**
+(`2604:a880:400:d1:0:4:f807:7001`), and Docker proxies IPv6 connections to a
+published port, so Caddy logs those with `client_ip 172.18.0.1` (the bridge
+gateway) rather than the real address — IPv4 callers (UptimeRobot,
+Anthropic's webhook from 160.79.106.132) log theirs. Nothing IP-based should
+be built on that field.
+
+Optional, still open: Ollama is already reachable over Tailscale
+(`INFERENCE_URL`), so nothing else is needed for local inference; and if the
+rig should also serve the workshop's music when the Mac is away, that is a
+WASAPI-loopback port of `MusicStreamer`, not a rebuild. `jarvis-mac`
+`50672da1` is still unrevoked.
 
 **API stage 4, Mac half — done 2026-09-18 ~05:05 UTC** (PR #30): the app
 talks to `https://api.opustower.dev/v1` with a per-device key; two routes
