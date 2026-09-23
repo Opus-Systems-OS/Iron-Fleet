@@ -28,6 +28,32 @@ RUN apt-get update \
 # 1.x line; bump deliberately, and re-run the smoke check in the README.
 RUN python3 -m pip install --no-cache-dir "anthropic==1.6.0"
 
+# Clipper toolchain (agents/clipper.json + the clipper skill): ffmpeg to cut
+# and encode (h264_nvenc when the driver exposes the encoder, libx264 when it
+# does not), rclone to put the finished clip in the public clips bucket, Node
+# for Buffer's CLI. yt-dlp is deliberately unpinned — YouTube breaks extractors
+# every few weeks and a pinned copy quietly stops working; rebuild when it does.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg openssl unzip \
+ && rm -rf /var/lib/apt/lists/*
+
+# rclone from upstream, not apt: jammy ships 1.53, which predates R2 support
+# (`provider = Cloudflare` arrived in 1.59) and would fail on the clips bucket.
+RUN curl -fsSLO https://downloads.rclone.org/v1.75.1/rclone-v1.75.1-linux-amd64.zip \
+ && unzip -q rclone-v1.75.1-linux-amd64.zip \
+ && install -m 755 rclone-v1.75.1-linux-amd64/rclone /usr/local/bin/rclone \
+ && rm -rf rclone-v1.75.1-linux-amd64 rclone-v1.75.1-linux-amd64.zip
+
+RUN python3 -m pip install --no-cache-dir yt-dlp
+
+# Node from NodeSource: jammy ships node 12 and @bufferapp/cli needs >= 18.
+# The CLI is pinned; `buffer update` from inside a session is not the way.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install -g @bufferapp/cli@1.2.0 \
+ && npm cache clean --force
+
 # Non-root. /workspace is the per-worker tool root, /mnt/memory is where the
 # SDK materialises memory stores if a session ever attaches one (it needs to
 # be writable by the worker user; the SDK creates the per-store dirs itself).
