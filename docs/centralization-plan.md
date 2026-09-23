@@ -54,6 +54,28 @@ Stage 0 spikes (6 ¢):
 The plan (stages 2–5 plus Track R, the Roblox dev team) is in that repo's README
 "Build order" and in these notes. Next is Track R, then stage 2.
 
+**Web stage 2 deployed 2026-09-23 ~18:30 UTC.** The PRs were Iron-Fleet #41, #40 and #42,
+API #18, and J.A.R.V.I.S-Web #2 and #3.
+
+What changed:
+- jarvis is at v6: cap `"200"`, medium effort, default environment `jarvis-lab`.
+- jarvis's vault holds `GH_TOKEN`, the read-only `JARVIS_GITHUB_READ_TOKEN`, and the
+  org's 5 repos are mounted.
+- `POST /sessions` takes `model` (`SESSION_MODELS`).
+- Multiagent rosters are supported (Roblox groundwork; no roster agents yet).
+
+Live check:
+- A Sonnet 5 session through the page ran on `claude-sonnet-5`, jarvis v6, for 6 ¢.
+- The public repos mounted.
+- **The private ones (Jarvis, Quest) failed with "Repository fetch failed"**: the
+  token is not accepted for them yet. Check org approval or the repo selection.
+
+Voice incident, found live:
+- The headless test granted the Mac's *real* mic, and a classroom's speech chained
+  through the always-open follow-up window.
+- Fixed in #3: the follow-up opens only after a question, once in a row, with ≥ 2 words.
+- Headless tests must use `--use-fake-device-for-media-stream`.
+
 The Roblox dev team (Track R, decided 2026-09-23):
 - Agents: `roblox-director` (Sonnet 5, coordinator), with `roblox-designer` and
   `roblox-programmer` (both Opus 5.5) on its multiagent roster.
