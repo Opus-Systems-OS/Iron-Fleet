@@ -59,9 +59,39 @@ pub struct CreateRequest {
     /// Mac answers the headset's music tools this way. `[a-z0-9-]`, ≤ 32.
     #[serde(default)]
     pub client: Option<String>,
+    /// Run this session on another model (`SESSION_MODELS`). Same as the
+    /// agent's own model → no override, so the agent's effort still applies.
+    /// Otherwise the session runs at that model's *default* effort: a
+    /// `model` override replaces the agent's model object in full.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 const SYSTEM_SUFFIX_MAX_CHARS: usize = 4_000;
+
+/// Models a client may pick per session. The per-session budget still
+/// binds whichever is chosen. Kept here, not in the environment, so the
+/// list is reviewed like the rest of the fleet definition.
+pub const SESSION_MODELS: &[&str] = &[
+    "claude-opus-5-5",
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-haiku-4-5-20251001",
+    "claude-fable-5-1",
+];
+
+fn check_model(model: Option<&str>) -> Result<Option<&str>> {
+    let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) else {
+        return Ok(None);
+    };
+    if !SESSION_MODELS.contains(&m) {
+        return Err(Error::InvalidRequest(format!(
+            "model `{m}` is not one of {}",
+            SESSION_MODELS.join(", ")
+        )));
+    }
+    Ok(Some(m))
+}
 
 #[derive(Debug, Serialize)]
 pub struct CreateResponse {
@@ -173,7 +203,14 @@ pub async fn create(
     let mut vault_ids: Vec<String> = state.mcp_fleet_vault_id.iter().cloned().collect();
     vault_ids.extend(state.db.agent_vault(&agent.slug)?);
 
-    let agent_ref = agent_ref(&state, &agent, &req.tools, req.system_suffix.as_deref()).await?;
+    let agent_ref = agent_ref(
+        &state,
+        &agent,
+        &req.tools,
+        req.system_suffix.as_deref(),
+        req.model.as_deref(),
+    )
+    .await?;
 
     let body = SessionCreate {
         agent: agent_ref,
@@ -196,6 +233,7 @@ pub async fn create(
         repositories = body.resources.len(),
         custom_tools = req.tools.len(),
         system_suffix = req.system_suffix.is_some(),
+        model = body.agent.model.as_ref().and_then(|m| m["id"].as_str()).unwrap_or("agent's own"),
         "session created"
     );
 
@@ -217,19 +255,21 @@ pub async fn create(
     ))
 }
 
-/// Pinned, unless the caller added tools or a system suffix — then the
-/// `agent_with_overrides` form, built on the agent's *live* definition (a
-/// `tools` override replaces the list in full, so the agent's own tools
-/// must be restated; `GET /v1/agents/{id}` is the one source that already
-/// has `mcp_toolset` names and everything else resolved).
+/// Pinned, unless the caller added tools, a system suffix or another model
+/// — then the `agent_with_overrides` form, built on the agent's *live*
+/// definition (a `tools` override replaces the list in full, so the agent's
+/// own tools must be restated; `GET /v1/agents/{id}` is the one source that
+/// already has `mcp_toolset` names and everything else resolved).
 async fn agent_ref(
     state: &AppState,
     agent: &crate::db::AgentRow,
     tools: &[CustomTool],
     system_suffix: Option<&str>,
+    model: Option<&str>,
 ) -> Result<AgentRef> {
     let suffix = system_suffix.map(str::trim).filter(|s| !s.is_empty());
-    if tools.is_empty() && suffix.is_none() {
+    let model = check_model(model)?;
+    if tools.is_empty() && suffix.is_none() && model.is_none() {
         return Ok(AgentRef::pinned(&agent.agent_id, agent.agent_version));
     }
     validate_custom_tools(tools)?;
@@ -241,16 +281,22 @@ async fn agent_ref(
         }
     }
     let live = state.api.get_agent_raw(&agent.agent_id).await?;
-    Ok(build_overrides(agent, &live, tools, suffix))
+    let model = model.filter(|m| live["model"]["id"].as_str() != Some(*m));
+    if tools.is_empty() && suffix.is_none() && model.is_none() {
+        // Asked for the agent's own model: stay pinned, keep its effort.
+        return Ok(AgentRef::pinned(&agent.agent_id, agent.agent_version));
+    }
+    Ok(build_overrides(agent, &live, tools, suffix, model))
 }
 
 /// Pure assembly, for tests: the live agent's tools + the custom ones; the
-/// live system prompt + a blank line + the suffix.
+/// live system prompt + a blank line + the suffix; the model as given.
 fn build_overrides(
     agent: &crate::db::AgentRow,
     live: &Value,
     tools: &[CustomTool],
     suffix: Option<&str>,
+    model: Option<&str>,
 ) -> AgentRef {
     let merged_tools = if tools.is_empty() {
         None
@@ -267,7 +313,13 @@ fn build_overrides(
         Some(base) if !base.trim().is_empty() => format!("{base}\n\n{sfx}"),
         _ => sfx.to_owned(),
     });
-    AgentRef::with_overrides(&agent.agent_id, agent.agent_version, merged_tools, system)
+    AgentRef::with_overrides(
+        &agent.agent_id,
+        agent.agent_version,
+        merged_tools,
+        system,
+        model,
+    )
 }
 
 fn validate_custom_tools(tools: &[CustomTool]) -> Result<()> {
@@ -687,7 +739,13 @@ mod tests {
             "system": "You are Jarvis.",
             "tools": [{"type": "agent_toolset_20260401"}, {"type": "mcp_toolset", "mcp_server_name": "fleet"}]
         });
-        let r = build_overrides(&agent_row(), &live, &[music_tool()], Some("Be brief."));
+        let r = build_overrides(
+            &agent_row(),
+            &live,
+            &[music_tool()],
+            Some("Be brief."),
+            None,
+        );
         assert_eq!(r.kind, "agent_with_overrides");
         assert_eq!((r.id.as_str(), r.version), ("agent_1", 5));
         let tools = r.tools.unwrap();
@@ -702,17 +760,61 @@ mod tests {
         assert_eq!(r.system.as_deref(), Some("You are Jarvis.\n\nBe brief."));
 
         // Suffix only: tools untouched (None → inherited), system appended.
-        let r = build_overrides(&agent_row(), &live, &[], Some("Be brief."));
+        let r = build_overrides(&agent_row(), &live, &[], Some("Be brief."), None);
         assert!(r.tools.is_none());
         assert!(r.system.is_some());
         // Tools only: system inherited.
-        let r = build_overrides(&agent_row(), &live, &[music_tool()], None);
+        let r = build_overrides(&agent_row(), &live, &[music_tool()], None, None);
         assert!(r.system.is_none());
         assert_eq!(r.tools.as_ref().unwrap().len(), 3);
         // The wire shape serializes the type tag and omits absent overrides.
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["type"], "agent_with_overrides");
         assert!(json.get("system").is_none());
+        assert!(
+            json.get("model").is_none(),
+            "no model override unless asked"
+        );
+    }
+
+    #[test]
+    fn a_model_override_replaces_only_the_model() {
+        let live = serde_json::json!({
+            "id": "agent_1", "version": 5,
+            "model": {"id": "claude-opus-5", "effort": "low"},
+            "system": "You are Jarvis.",
+            "tools": [{"type": "agent_toolset_20260401"}]
+        });
+        let r = build_overrides(&agent_row(), &live, &[], None, Some("claude-sonnet-5"));
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["type"], "agent_with_overrides");
+        assert_eq!(json["model"], serde_json::json!({"id": "claude-sonnet-5"}));
+        assert!(json.get("tools").is_none(), "tools inherited");
+        assert!(json.get("system").is_none(), "system inherited");
+    }
+
+    #[test]
+    fn only_allowlisted_models_are_accepted() {
+        assert_eq!(check_model(None).unwrap(), None);
+        assert_eq!(check_model(Some("  ")).unwrap(), None);
+        assert_eq!(
+            check_model(Some("claude-sonnet-5")).unwrap(),
+            Some("claude-sonnet-5")
+        );
+        for bad in [
+            "gpt-5",
+            "claude-opus-4-1",
+            "claude-sonnet-5 ",
+            "CLAUDE-OPUS-5-5",
+        ] {
+            let r = check_model(Some(bad));
+            // Trailing space is trimmed and accepted; the rest are refused.
+            if bad.trim() == "claude-sonnet-5" {
+                assert!(r.is_ok());
+            } else {
+                assert!(matches!(r, Err(Error::InvalidRequest(_))), "{bad}");
+            }
+        }
     }
 
     #[test]
