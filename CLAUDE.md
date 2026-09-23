@@ -138,8 +138,11 @@ Do not start a stage before the one above it works end to end.
   DigitalOcean nyc1, `198.199.66.109` / `2604:a880:400:d1:0:4:f807:7001`.
   `fleet.opustower.dev` → `control-plane`, `mcp.opustower.dev` → `mcp-fleet`,
   both behind Caddy-terminated TLS; deploy config lives in `deploy/droplet/`.
-  The droplet hosts the two binaries we already have and nothing else — no
-  session store, no agents, no second control plane. Cut over from Railway
+  Beside them, in the same compose project: the Opus Systems OS API
+  (`api.opustower.dev`) and J.A.R.V.I.S. on the web (`jarvis.opustower.dev`,
+  repo `Opus-Systems-OS/J.A.R.V.I.S-Web`: a password gate and page in front
+  of the API, holding no fleet state). No session store, no agents, no
+  second control plane. Cut over from Railway
   and Railway deleted 2026-09-15; the droplet is the only deployment.
   Droplet secrets live in `.env` on the box (`chmod 600`), never in this
   repo.

@@ -31,3 +31,13 @@ api.opustower.dev {
 		output file /data/access-api.log
 	}
 }
+
+# J.A.R.V.I.S. on the web. The site sets its own security headers (CSP,
+# HSTS, frame-deny); Caddy only terminates TLS. Request bodies (the unlock
+# passphrase) are never logged — Caddy's access log has no bodies.
+jarvis.opustower.dev {
+	reverse_proxy jarvis-web:8200
+	log {
+		output file /data/access-jarvis.log
+	}
+}
