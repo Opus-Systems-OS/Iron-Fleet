@@ -1,0 +1,13 @@
+{
+  "slug": "roblox-dev",
+  "environment": {
+    "name": "roblox-dev",
+    "config": {
+      "type": "cloud",
+      "networking": { "type": "unrestricted" },
+      "packages": {
+        "apt": ["gh", "jq", "unzip"]
+      }
+    }
+  }
+}
