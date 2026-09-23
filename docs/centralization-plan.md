@@ -630,6 +630,46 @@ headset builds come from here unless that keystore is copied.
 `jarvis-mac` `50672da1` is no longer used by anything (the native app took
 the `mac` key when it gained pairing) — revoke it when convenient.
 
+**Clipper — built 2026-09-22 at the rig, open as PR #38, nothing deployed.**
+A fifth agent (`clipper`, `rig-gpu`, cap `"300"`) that cuts long-form YouTube
+into vertical Shorts and leaves them **queued** on the ClipperZero Buffer
+channel for a human to approve — `addToQueue` + `schedulingType: automatic`,
+with `shareNow`/`shareNext` ruled out in both the system prompt and
+`agents/skills/clipper/SKILL.md`. Buffer's CLI (`@bufferapp/cli` 1.2.0) is
+installed and authenticated on the rig; org `6ab3594a28dc3b70442bafd8`,
+channel `ClipperZero` = `6ab362e7ea19ca0bdec148dc` (`youtube`).
+
+Three API facts drove the design and are written into the skill: Buffer takes
+a video **URL, not a file**, and fetches it **when the post publishes** (so a
+presigned URL passes `createPost` and fails silently days later, and a clip
+must outlive any post pointing at it); `posts create` has **no idempotency
+key**, so a retry after a timeout duplicates the post; `--dry-run` is free and
+local. `worker/sdk/`'s image grew ffmpeg, yt-dlp, Node 22 + the Buffer CLI and
+rclone **from upstream** — jammy's apt rclone is 1.53, which predates R2
+support (`provider = Cloudflare` arrived in 1.59). Verified locally:
+`cargo test -p control-plane` 68/68 with the new agent and skill in the
+registry, the image builds, and each tool runs in it (`node v22.23.2`,
+`buffer 1.2.0`, `yt-dlp 2026.08.19`, `rclone v1.75.1`, `h264_nvenc` present).
+
+**Before a clip can go out** (in this order, none done):
+
+1. An R2 bucket for clips plus a public custom domain in front of it
+   (`clips.opustower.dev`, the zone is already on Cloudflare) and a token
+   scoped to it. The backup token is scoped to `iron-fleet-backups` and is no
+   use here.
+2. `BUFFER_API_KEY` and the `RCLONE_CONFIG_CLIPS_*`/`CLIPS_*` values into
+   `worker/sdk/.env` on the rig — see `worker/sdk/env.example`.
+3. `docker compose up -d --build` in `worker/sdk` on the rig (this stops the
+   worker briefly, so not while a `gpu-compute` session is in flight).
+4. Merge #38 → image build → `deploy.sh`. Only then does the agent exist on
+   Anthropic's side, and boot sync needs credits to upload the new skill —
+   see the fifth finding above for what a credit-less sync does.
+
+Open question for the user, not for the agent: which channels ClipperZero is
+allowed to clip. The skill credits the source and links the original in every
+description and refuses sources the task did not name, but that is a
+mitigation, not permission.
+
 **Rig backlog — worked at the Windows rig 2026-09-22** (parked
 2026-09-18). Items 1–3 done and verified; item 4 below:
 

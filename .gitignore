@@ -12,3 +12,6 @@ __pycache__/
 
 # Claude Code per-machine settings
 .claude/settings.local.json
+
+# Buffer CLI writes a repo-local config holding the API key if run in here
+.buffer/

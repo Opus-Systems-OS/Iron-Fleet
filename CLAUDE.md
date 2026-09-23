@@ -55,6 +55,7 @@ finishes, so final cost lands slightly over.
 | `blueweb-client` | `"1000"` | high | Billable client code work |
 | `blueweb-ops` | `"200"` | medium | Contracts, admin; no code tools |
 | `gpu-compute` | `"500"` | medium | Runs on `rig-gpu` |
+| `clipper` | `"300"` | medium | Runs on `rig-gpu`; queues Shorts in Buffer, never publishes |
 
 Per-session caps do not stop fifty sessions. Workspace- and agent-level caps
 with alerts are configured in the Console as a backstop, not in this repo.
@@ -80,6 +81,25 @@ The separate native Jarvis app (`Opus-Systems-OS/Jarvis`, Swift) is also a
 fleet client since 2026-09-18: its conversations are `jarvis` sessions via
 the Opus Systems OS API, with its Apple Music tools declared per session
 (never on the agent) and executed on the device.
+
+## Clipper
+
+`clipper` cuts long-form YouTube into vertical Shorts for the **ClipperZero**
+channel and leaves them in the Buffer queue. It runs on `rig-gpu`, because the
+toolchain (yt-dlp, ffmpeg/NVENC, rclone, Buffer's CLI) is baked into
+`worker/sdk/`'s image and the 5070 does the encoding.
+
+- **It queues; a human publishes.** Every post is `addToQueue` +
+  `schedulingType: automatic`. `shareNow` and `shareNext` are forbidden in the
+  agent's system prompt and in the skill. Approval happens in Buffer, not here.
+- **Buffer takes a URL, not a file, and fetches it at publish time.** Clips go
+  to a public Cloudflare R2 bucket behind `clips.opustower.dev` and must stay
+  reachable until the post goes out — a presigned URL passes `createPost` and
+  then fails silently days later.
+- **`posts create` is not idempotent.** There is no idempotency key, so a retry
+  after a timeout duplicates the post; the skill lists recent posts and matches
+  before retrying.
+- Buffer credentials live in `worker/sdk/.env` on the rig, never in this repo.
 
 ## Layout
 
