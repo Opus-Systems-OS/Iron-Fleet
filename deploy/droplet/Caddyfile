@@ -1,8 +1,18 @@
 # Automatic HTTPS (Let's Encrypt, HTTP-01 on :80). All hosts are DNS-only in
 # Cloudflare — the proxy must stay off or ACME and the MCP callbacks break.
 
+# Client-facing traffic moved to api.opustower.dev on 2026-09-22 (the API's
+# stage 4). Only Anthropic's webhook and the health check UptimeRobot polls
+# are served here; everything else 404s. The API and mcp-fleet reach the
+# control plane over the compose network, not through this host.
 fleet.opustower.dev {
-	reverse_proxy control-plane:8080
+	@open path /webhooks/* /healthz
+	handle @open {
+		reverse_proxy control-plane:8080
+	}
+	handle {
+		respond 404
+	}
 	log {
 		output file /data/access-fleet.log
 	}
