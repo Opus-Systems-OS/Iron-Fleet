@@ -603,26 +603,60 @@ the webhook there. Gotcha: the Caddyfile is a single-file bind mount —
 unchanged" — after any Caddyfile change run
 `docker compose up -d --force-recreate caddy`.
 
+**Desktop clients — the Mac, as of 2026-09-20.** Two apps, both in
+`/Applications`, both holding the same `mac` key `fb95b84b`
+(`~/.config/opus-systems/api-key`, the Tauri `control-plane.json`, and
+Keychain `com.local.jarvis` / `anthropic-api-key`):
+
+- **`Jarvis.app`** — the native Swift app (repo `Opus-Systems-OS/Jarvis`,
+  `./build.sh` → `build/Jarvis.app`, copy into `/Applications`). Besides
+  its own orb and voice it is **the workshop's Mac half**: `WorkshopRelay`
+  answers the headset's music tools on the session labelled
+  `iron_fleet_client=quest`; `MusicStreamer` captures the Music app with
+  ScreenCaptureKit and serves PCM on **48100**, muting the Mac while the
+  headset listens; `MusicInfoServer` serves now-playing, artwork and
+  transport on **48101**; Settings → Workshop approves a headset's pairing
+  code (that is why this app needs the `pair:approve` scope). A **login
+  item** since 2026-09-20, so the headset always finds it. Needs the
+  Screen & System Audio Recording permission once.
+- **`J.A.R.V.I.S..app`** — the Tauri fleet dashboard (this repo, `app/`).
+  Fleet, Usage and Jarvis tabs. Easy to confuse with the above: the
+  workshop talks only to `Jarvis.app`.
+
+Mac-only, and not portable as written: the music capture is
+ScreenCaptureKit (a Windows port would be WASAPI loopback), and the Quest
+release keystore lives in `~/.config/opus-systems/` on the Mac, so signed
+headset builds come from here unless that keystore is copied.
+
+`jarvis-mac` `50672da1` is no longer used by anything (the native app took
+the `mac` key when it gained pairing) — revoke it when convenient.
+
 **Rig backlog — do these next time at the Windows rig** (parked
-2026-09-18; nothing here blocks Mac-side work, and the shared control-plane
-token keeps the Windows app working until then):
+2026-09-18, still open 2026-09-22; nothing here blocks Mac-side work, and
+the shared control-plane token keeps the Windows app working until then):
 
 1. Docker Desktop → Settings → General → "Start Docker Desktop when you
    sign in" (the `rig-gpu` worker container needs it to survive a reboot).
 2. In the rig's Iron-Fleet checkout:
    `git remote set-url origin https://github.com/Opus-Systems-OS/Iron-Fleet.git`,
-   then `git pull`.
-3. Mint the rig's API key from the Mac:
-   `ssh root@198.199.66.109 "cd /opt/iron-fleet/deploy/droplet && docker compose exec -T api opus-api keys create --name win-rig --scopes fleet:read,sessions:read,sessions:write,usage:read,inference"`
+   then `git pull`. (The org move and everything since — ops, pairing,
+   the client label — is upstream.)
+3. Mint the rig's own API key from the Mac and stop sharing `mac`'s:
+   `ssh root@198.199.66.109 "cd /opt/iron-fleet/deploy/droplet && docker compose exec -T api opus-api keys create --name win-rig --scopes fleet:read,sessions:read,sessions:write,usage:read,inference,ops:read"`
    and put it, with `url` `https://api.opustower.dev/v1`, in
    `%APPDATA%\com.ironfleet.app\control-plane.json`. Rebuild the app
    (`npm run tauri build -- --no-bundle`, binary in
-   `target.nosync\release\app.exe`). Fleet tab should show the four agents
-   and the Rig line.
+   `target.nosync\release\app.exe`). Fleet tab should show the four
+   agents and the Rig line.
 4. Only then narrow Caddy: `fleet.opustower.dev` serves `/webhooks/*` and
    `/healthz` only (everything else 404), and the shared
    `CONTROL_PLANE_TOKEN` stops being on any laptop. That closes the API's
    stage 4.
+
+Optional, once those are done: Ollama is already reachable over Tailscale
+(`INFERENCE_URL`), so nothing else is needed for local inference; and if
+the rig should also serve the workshop's music when the Mac is away, that
+is a WASAPI-loopback port of `MusicStreamer`, not a rebuild.
 
 **API stage 4, Mac half — done 2026-09-18 ~05:05 UTC** (PR #30): the app
 talks to `https://api.opustower.dev/v1` with a per-device key; two routes
