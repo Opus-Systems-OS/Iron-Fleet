@@ -22,6 +22,7 @@ services:
       - control-plane
       - mcp-fleet
       - api
+      - jarvis-web
 
   control-plane:
     image: ghcr.io/opus-systems-os/iron-fleet/control-plane:latest
@@ -68,8 +69,30 @@ services:
     depends_on:
       - control-plane
 
+  # J.A.R.V.I.S. on the web — github.com/Opus-Systems-OS/J.A.R.V.I.S-Web.
+  # The password gate and page at jarvis.opustower.dev, in front of the API.
+  # No env_file on purpose: it gets its three variables and none of the
+  # box's other secrets. The hash is single-quoted in .env ($ inside).
+  # Unset values don't break the rest of the stack: jarvis-web alone
+  # refuses to start and logs which variable is missing.
+  jarvis-web:
+    image: ghcr.io/opus-systems-os/jarvis-web:latest
+    restart: unless-stopped
+    environment:
+      PORT: "8200"
+      DATABASE_PATH: /data/jarvis-web.db
+      OPUS_API_URL: http://api:8100
+      WEB_API_KEY: ${WEB_API_KEY:-}
+      JARVIS_WEB_PASSWORD_HASH: ${JARVIS_WEB_PASSWORD_HASH:-}
+      RUST_LOG: info,tower_http=info
+    volumes:
+      - web_data:/data
+    depends_on:
+      - api
+
 volumes:
   cp_data:
   api_data:
+  web_data:
   caddy_data:
   caddy_config:
