@@ -76,6 +76,25 @@ Voice incident, found live:
 - Fixed in #3: the follow-up opens only after a question, once in a row, with ≥ 2 words.
 - Headless tests must use `--use-fake-device-for-media-stream`.
 
+**Voice fixes, 2026-09-24 ~04:15 UTC** (J.A.R.V.I.S-Web #7, #8):
+- **The focused HUD takes the mic.** It claims on unlock and on window focus. A HUD
+  without the mic says so.
+- **Requests are assembled across pauses.** After the wake word, phrases are collected
+  until 1.3 s of quiet, and speech in progress holds the request open. Before this,
+  long sentences reached Jarvis as their first clause only. The same request within
+  4 s is sent once.
+- **Arc needs hardware (graphics) acceleration on** for cloud ears. Without it, capture
+  starves; the user found this.
+- **Debugging voice:** use the API's `voice transcribe` log lines (bytes, duration,
+  chars; never the words) plus the session's `user.message` events.
+
+**Next:**
+- **Web stage 4** (Usage tab, Fish credit, Anthropic balance ledger, spoken warnings).
+- **Waiting on the user:**
+  - the org's approval of the `jarvis-read` token (the private repo mounts);
+  - the Roblox inputs (the game name, the three keys, the plugin link). Track R is on
+    branch `roblox-team`.
+
 **Web stage 3 deployed 2026-09-24 ~03:30 UTC** (J.A.R.V.I.S-Web #6, API #20):
 - **Fleet tab:** agents with Start, sessions, and an inspector with message/interrupt.
 - **Systems tab:** a live SVG map. Clients come from the new `GET /v1/clients`
