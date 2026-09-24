@@ -675,8 +675,32 @@ mod tests {
         let effort = |s: &str| reg.agents[s].agent.model.effort.unwrap().as_str();
         assert_eq!((cap("jarvis"), effort("jarvis")), (200, "medium"));
         assert_eq!(reg.agents["jarvis"].default_environment, "jarvis-lab");
+        // The Roblox studio: Jarvis directs three specialists, one $10 budget,
+        // Blender in the cloud sandbox by default.
+        let studio = &reg.agents["jarvis-studio"];
+        assert_eq!(
+            (cap("jarvis-studio"), studio.default_environment.as_str()),
+            (1000, "roblox-dev")
+        );
+        let roster = studio.agent.multiagent.as_ref().unwrap()["agents"]
+            .as_array()
+            .unwrap();
+        let members: Vec<&str> = roster.iter().filter_map(|e| e["slug"].as_str()).collect();
+        assert_eq!(
+            members,
+            ["roblox-designer", "roblox-modeler", "roblox-programmer"]
+        );
+        assert!(
+            members
+                .iter()
+                .all(|m| reg.agents[*m].credentials.is_empty()),
+            "members share the studio's vault"
+        );
         // Read-only token: repo mounts + `gh` on api.github.com, nothing else.
-        let gh = reg.agents["jarvis"].github.as_ref().expect("jarvis mounts the org");
+        let gh = reg.agents["jarvis"]
+            .github
+            .as_ref()
+            .expect("jarvis mounts the org");
         assert_eq!(gh.token_env, "JARVIS_GITHUB_READ_TOKEN");
         assert!(gh.mount.iter().any(|m| m.ends_with("/Jarvis")));
         assert!(gh.mount.iter().all(|m| is_github_repo_url(m)));

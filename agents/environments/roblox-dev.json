@@ -6,7 +6,7 @@
       "type": "cloud",
       "networking": { "type": "unrestricted" },
       "packages": {
-        "apt": ["gh", "jq", "unzip"]
+        "apt": ["gh", "jq", "unzip", "blender", "python3-numpy"]
       }
     }
   }

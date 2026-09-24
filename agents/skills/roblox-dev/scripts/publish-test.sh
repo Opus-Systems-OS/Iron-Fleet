@@ -5,20 +5,20 @@
 #
 #   bash <skill dir>/scripts/publish-test.sh     # from the game repo root
 #
-# Ids come from the repo's places.json ({"test": {"universe_id": …,
-# "place_id": …}}). The key is ROBLOX_PUBLISH_KEY, which in the sandbox is a
+# Ids come from the repo's studio.json ({"test": {"universe_id": …,
+# "place_id": …}, "creator": …}). The key is ROBLOX_PUBLISH_KEY, which in the sandbox is a
 # placeholder the egress proxy swaps for the real key on apis.roblox.com
 # only. That key is an Open Cloud `universe-places` write key scoped to the
-# test experience alone, so even a wrong id in places.json cannot reach the
+# test experience alone, so even a wrong id in studio.json cannot reach the
 # live game: Roblox refuses it (403).
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 
-[ -f places.json ] || { echo "no places.json in $(pwd)" >&2; exit 2; }
+[ -f studio.json ] || { echo "no studio.json in $(pwd)" >&2; exit 2; }
 [ -n "${ROBLOX_PUBLISH_KEY:-}" ] || { echo "ROBLOX_PUBLISH_KEY is not set in this session" >&2; exit 2; }
-universe=$(jq -er '.test.universe_id' places.json)
-place=$(jq -er '.test.place_id' places.json)
-[[ "$universe" =~ ^[0-9]+$ && "$place" =~ ^[0-9]+$ ]] || { echo "places.json ids must be numbers" >&2; exit 2; }
+universe=$(jq -er '.test.universe_id' studio.json)
+place=$(jq -er '.test.place_id' studio.json)
+[[ "$universe" =~ ^[0-9]+$ && "$place" =~ ^[0-9]+$ ]] || { echo "studio.json ids must be numbers" >&2; exit 2; }
 
 mkdir -p build
 rojo build default.project.json -o build/game.rbxl

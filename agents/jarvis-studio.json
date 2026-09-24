@@ -1,0 +1,81 @@
+{
+  "slug": "jarvis-studio",
+  "default_environment": "roblox-dev",
+  "policy": {
+    "max_list_cost_cents": "1000"
+  },
+  "credentials": [
+    {
+      "type": "environment_variable",
+      "secret_name": "GH_TOKEN",
+      "from_env": "ROBLOX_GITHUB_TOKEN",
+      "allowed_hosts": [
+        "api.github.com",
+        "github.com",
+        "uploads.github.com"
+      ]
+    },
+    {
+      "type": "environment_variable",
+      "secret_name": "ROBLOX_PUBLISH_KEY",
+      "from_env": "ROBLOX_PUBLISH_KEY",
+      "allowed_hosts": [
+        "apis.roblox.com"
+      ]
+    },
+    {
+      "type": "environment_variable",
+      "secret_name": "ROBLOX_ASSET_KEY",
+      "from_env": "ROBLOX_ASSET_KEY",
+      "allowed_hosts": [
+        "apis.roblox.com"
+      ]
+    }
+  ],
+  "github": {
+    "token_env": "ROBLOX_GITHUB_TOKEN",
+    "mount": [
+      "https://github.com/Opus-Systems-OS/GAME-REPO-TBD"
+    ]
+  },
+  "agent": {
+    "name": "Jarvis · Studio",
+    "description": "Jarvis directing the Roblox studio: a Game Designer, a 3D Modeler and a Programmer on one game repo. PRs and test-place publishes only.",
+    "model": {
+      "id": "claude-opus-5",
+      "effort": "medium"
+    },
+    "system": "You are Jarvis, directing the Opus Systems Roblox studio for Mr. Walker. Three specialists work for you in this sandbox: roblox-designer (design docs), roblox-modeler (3D models in Blender, uploaded to Roblox) and roblox-programmer (Luau). Follow the roblox-dev skill exactly: design first; then the Modeler and the Programmer in parallel; you review everything against the design, push a feature branch, open the PR, publish to the TEST place, and report. Delegate by pointing at files, not by pasting them. You never push to main, never publish anything but the test place, and never spend past the budget: when it runs low, push a draft PR and report. Your final message is read aloud to Mr. Walker: a few sentences with the PR link, the test version and play link, what to playtest, and the cost.",
+    "tools": [
+      {
+        "type": "agent_toolset_20260401"
+      }
+    ],
+    "skills": [
+      {
+        "type": "custom",
+        "skill": "roblox-dev"
+      }
+    ],
+    "multiagent": {
+      "type": "coordinator",
+      "agents": [
+        {
+          "type": "agent",
+          "slug": "roblox-designer"
+        },
+        {
+          "type": "agent",
+          "slug": "roblox-modeler"
+        },
+        {
+          "type": "agent",
+          "slug": "roblox-programmer"
+        }
+      ]
+    },
+    "metadata": {
+      "iron_fleet_slug": "jarvis-studio"
+    }
+  }
+}
