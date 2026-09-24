@@ -76,6 +76,19 @@ Voice incident, found live:
 - Fixed in #3: the follow-up opens only after a question, once in a row, with ≥ 2 words.
 - Headless tests must use `--use-fake-device-for-media-stream`.
 
+**Web stage 3 deployed 2026-09-24 ~03:30 UTC** (J.A.R.V.I.S-Web #6, API #20):
+- **Fleet tab:** agents with Start, sessions, and an inspector with message/interrupt.
+- **Systems tab:** a live SVG map. Clients come from the new `GET /v1/clients`
+  (key names plus last use, scope `ops:read`); droplet services from Docker; the rig
+  from Tailscale plus Ollama; external services from ops.
+- **Terminal tab:** the jarvis sandbox. Terminal turns are silent.
+- **Mic lease:** `jarvis-web` `/web/mic`, 20 s, memory only. Only one open HUD listens
+  and speaks the greeting; an orb click takes over. Found live: two open HUDs each
+  answered the same question.
+- **Checked headless against live:** every tab, 17 map nodes, a terminal
+  `ls /workspace`.
+- **Deferred with Track R:** the studio thread view.
+
 **Voice verified by the user, 2026-09-23 evening:**
 - **Chrome:** the browser's own speech recognition.
 - **Arc:** "cloud ears". The page detects utterances and sends 16 kHz WAV to the
