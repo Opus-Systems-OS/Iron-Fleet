@@ -76,6 +76,29 @@ Voice incident, found live:
 - Fixed in #3: the follow-up opens only after a question, once in a row, with ≥ 2 words.
 - Headless tests must use `--use-fake-device-for-media-stream`.
 
+**Voice verified by the user, 2026-09-23 evening:**
+- **Chrome:** the browser's own speech recognition.
+- **Arc:** "cloud ears". The page detects utterances and sends 16 kHz WAV to the
+  API's `/v1/voice/transcribe`, which uses Fish speech-to-text at $0.36 per audio hour.
+  - It is picked automatically after the browser engine fails 3×, and remembered
+    per browser.
+  - PRs: J.A.R.V.I.S-Web #4 and #5, API #19.
+
+**The Roblox studio (Track R, revised 2026-09-23 evening):** Jarvis directs.
+- **`jarvis-studio`**: Jarvis's persona, the coordinator, `"1000"`. Its roster is
+  `roblox-designer`, `roblox-modeler` and `roblox-programmer`, all Opus 5.5.
+- **Handoff:** jarvis passes Roblox work to it with `start_session`, using `rig-gpu`
+  only when the user says he is on Windows.
+- **Models are Blender scripts:** `models/<name>/build.py` → FBX/GLB + preview → an
+  Open Cloud Assets upload.
+- **Spike:** apt Blender 4.0 works in the cloud sandbox with `python3-numpy`. The
+  512 px Cycles CPU preview takes about 2 s, with no denoiser.
+- **Where it is:** everything is on branch `roblox-team`, *not merged*. It waits on the
+  game repo name, `ROBLOX_GITHUB_TOKEN`, `ROBLOX_PUBLISH_KEY`, `ROBLOX_ASSET_KEY` plus
+  the creator id, and the friend's Blender plugin. Boot sync fails loudly on a missing
+  credential env var, so the agent files cannot land before the keys.
+- **Superseded:** the Sonnet `roblox-director` design below.
+
 The Roblox dev team (Track R, decided 2026-09-23):
 - Agents: `roblox-director` (Sonnet 5, coordinator), with `roblox-designer` and
   `roblox-programmer` (both Opus 5.5) on its multiagent roster.
