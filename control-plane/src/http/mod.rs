@@ -1,6 +1,7 @@
 //! Router, shared state, and bearer auth for the control plane's own API.
 
 pub mod agents;
+pub mod files;
 pub mod health;
 pub mod inference;
 pub mod sessions;
@@ -51,7 +52,8 @@ pub fn router(state: AppState) -> Router {
         .route("/sessions/{id}/interrupt", post(sessions::interrupt))
         .route("/sessions/{id}/tool-results", post(sessions::tool_results))
         .route("/usage", get(usage::get))
-        .route("/usage/export.csv", get(usage::export_csv));
+        .route("/usage/export.csv", get(usage::export_csv))
+        .merge(files::router());
     if state.inference.is_some() {
         protected = protected.merge(inference::router());
     }

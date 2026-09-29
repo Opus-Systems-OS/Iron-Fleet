@@ -2,6 +2,8 @@
 //! [`Client::send`], which is the only place the beta header is set — so it
 //! cannot be forgotten. The GA Skills API (`/v1/skills`, multipart, no beta)
 //! goes through [`Client::send_multipart`]; both share auth and error handling.
+//! So does the GA Files API upload (`/v1/files`); the rest of the Files API
+//! goes through `send`, whose beta header it accepts and `scope_id` needs.
 
 pub mod types;
 
@@ -306,6 +308,95 @@ impl Client {
             Some(&SendEvents { events }),
         )
         .await
+    }
+
+    /// Mount a Files API upload into a running session
+    /// (`POST /v1/sessions/{id}/resources`, docs: managed-agents/files).
+    pub async fn add_resource(
+        &self,
+        session_id: &str,
+        resource: &SessionResource,
+    ) -> Result<Value> {
+        self.send::<Value>(
+            Method::POST,
+            &format!("/v1/sessions/{session_id}/resources"),
+            &[],
+            Some(resource),
+        )
+        .await
+    }
+
+    // ---- files (GA; the managed-agents beta header rides along harmlessly
+    // and is what `scope_id` filtering needs)
+
+    /// `POST /v1/files`. No `expires_in_seconds`: an image or document block
+    /// stays in a session's history, and a Messages request referencing an
+    /// expired file fails before inference — every later turn of that
+    /// session would fail with it.
+    pub async fn upload_file(
+        &self,
+        filename: &str,
+        mime_type: Option<&str>,
+        bytes: Vec<u8>,
+    ) -> Result<FileObject> {
+        let mut part = reqwest::multipart::Part::bytes(bytes).file_name(filename.to_owned());
+        if let Some(m) = mime_type {
+            part = part.mime_str(m)?;
+        }
+        let form = reqwest::multipart::Form::new().part("file", part);
+        self.send_multipart("/v1/files", form).await
+    }
+
+    pub async fn file_meta(&self, file_id: &str) -> Result<FileObject> {
+        self.send(
+            Method::GET,
+            &format!("/v1/files/{file_id}"),
+            &[],
+            None::<&()>,
+        )
+        .await
+    }
+
+    /// Raw list envelope of the files scoped to a session — what the agent
+    /// wrote to `/mnt/session/outputs/` (plus the session's copies of its
+    /// uploads, which are not `downloadable`).
+    pub async fn session_files_raw(&self, session_id: &str) -> Result<Value> {
+        self.send::<Value>(
+            Method::GET,
+            "/v1/files",
+            &[("scope_id", session_id), ("limit", "100")],
+            None::<&()>,
+        )
+        .await
+    }
+
+    /// `GET /v1/files/{id}/content`, status checked, body left unread so the
+    /// caller can stream it. Only `downloadable` files (agent outputs) work;
+    /// an upload answers 400.
+    pub async fn file_content(&self, file_id: &str) -> Result<reqwest::Response> {
+        let path = format!("/v1/files/{file_id}/content");
+        let resp = self
+            .request_with(&self.stream_http, Method::GET, &path)
+            .header("anthropic-beta", MANAGED_AGENTS_BETA)
+            .send()
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let request_id = resp
+                .headers()
+                .get("request-id")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
+            let bytes = resp.bytes().await?;
+            return Err(upstream_error(
+                status,
+                &bytes,
+                request_id,
+                &Method::GET,
+                &path,
+            ));
+        }
+        Ok(resp)
     }
 
     /// Stop a session's in-flight work without ending the session. This is a

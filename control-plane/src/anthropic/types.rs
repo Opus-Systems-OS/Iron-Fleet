@@ -245,6 +245,42 @@ pub struct TextBlock {
     pub text: String,
 }
 
+/// One block of a `user.message`. Images and documents reference a file
+/// uploaded through the Files API by id (docs: api/beta/sessions/events/send
+/// — `BetaManagedAgentsFileImageSource` / `…FileDocumentSource`).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentBlock {
+    Text {
+        text: String,
+    },
+    Image {
+        source: FileSource,
+    },
+    Document {
+        source: FileSource,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
+}
+
+/// `{"type": "file", "file_id": …}`.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FileSource {
+    #[serde(rename = "type")]
+    pub kind: &'static str, // "file"
+    pub file_id: String,
+}
+
+impl FileSource {
+    pub fn file(file_id: impl Into<String>) -> Self {
+        FileSource {
+            kind: "file",
+            file_id: file_id.into(),
+        }
+    }
+}
+
 /// An event we send to a session (`initial_events` on create, or the body of
 /// `POST /v1/sessions/{id}/events`). `Interrupt` is how a running turn is
 /// stopped — there is no separate interrupt route (docs:
@@ -254,7 +290,7 @@ pub struct TextBlock {
 #[serde(tag = "type")]
 pub enum SessionEvent {
     #[serde(rename = "user.message")]
-    Message { content: Vec<TextBlock> },
+    Message { content: Vec<ContentBlock> },
     #[serde(rename = "user.interrupt")]
     Interrupt,
     /// The result of a client-executed custom tool, answering an
@@ -269,13 +305,15 @@ pub enum SessionEvent {
 }
 
 impl SessionEvent {
+    #[cfg(test)]
     pub fn text(text: impl Into<String>) -> Self {
         SessionEvent::Message {
-            content: vec![TextBlock {
-                kind: "text",
-                text: text.into(),
-            }],
+            content: vec![ContentBlock::Text { text: text.into() }],
         }
+    }
+
+    pub fn user_message(content: Vec<ContentBlock>) -> Self {
+        SessionEvent::Message { content }
     }
 
     pub fn custom_tool_result(
@@ -292,6 +330,18 @@ impl SessionEvent {
             is_error,
         }
     }
+}
+
+/// A Files API object (`POST /v1/files`, `GET /v1/files/{id}`), the fields
+/// the control plane reads.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileObject {
+    pub id: String,
+    pub filename: String,
+    #[serde(default)]
+    pub mime_type: String,
+    #[serde(default)]
+    pub size_bytes: u64,
 }
 
 /// Body of `POST /v1/sessions/{id}/events`. Shape mirrors `SessionCreate`'s
@@ -321,7 +371,8 @@ pub struct SessionCreate {
     pub resources: Vec<SessionResource>,
 }
 
-/// One `resources[]` entry. Only `github_repository` is modelled.
+/// One `resources[]` entry — at create, or the body of
+/// `POST /v1/sessions/{id}/resources` on a running session.
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionResource {
@@ -331,6 +382,9 @@ pub enum SessionResource {
         url: String,
         authorization_token: String,
     },
+    /// A Files API upload, mounted read-only at
+    /// `/mnt/session/uploads<mount_path>` (docs: managed-agents/files).
+    File { file_id: String, mount_path: String },
 }
 
 impl std::fmt::Debug for SessionResource {
@@ -340,6 +394,14 @@ impl std::fmt::Debug for SessionResource {
                 .debug_struct("GithubRepository")
                 .field("url", url)
                 .field("authorization_token", &"<redacted>")
+                .finish(),
+            SessionResource::File {
+                file_id,
+                mount_path,
+            } => f
+                .debug_struct("File")
+                .field("file_id", file_id)
+                .field("mount_path", mount_path)
                 .finish(),
         }
     }

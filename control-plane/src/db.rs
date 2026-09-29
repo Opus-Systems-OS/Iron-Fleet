@@ -1,5 +1,6 @@
-//! SQLite: agent registry, budget policy, usage rollups. Nothing else lives
-//! here — session state belongs to Anthropic and is always read live.
+//! SQLite: agent registry, budget policy, usage rollups, and the ids of
+//! files uploaded through this control plane. Nothing else lives here —
+//! session state belongs to Anthropic and is always read live.
 
 use crate::error::Result;
 use crate::money::Cents;
@@ -74,6 +75,26 @@ CREATE TABLE IF NOT EXISTS session_usage (
   -- "<type>: <message>" of the session.error the session ended on, NULL when
   -- it ended on a reply. Added after the table shipped: see `migrate`.
   last_error        TEXT
+);
+-- Files uploaded through POST /files. The Files API is workspace-wide, so
+-- this is the allowlist: a session attachment must be one of these ids,
+-- never an arbitrary file_id a client or an agent names (docs:
+-- build-with-claude/files, "workspace-scoped access").
+CREATE TABLE IF NOT EXISTS uploads (
+  file_id      TEXT PRIMARY KEY,
+  filename     TEXT NOT NULL,
+  mime_type    TEXT NOT NULL,
+  size_bytes   INTEGER NOT NULL,
+  uploaded_at  TEXT NOT NULL
+);
+-- Where each upload is mounted in each session (under /mnt/session/uploads),
+-- so a file is mounted once per session and two files never share a path.
+CREATE TABLE IF NOT EXISTS upload_mounts (
+  session_id  TEXT NOT NULL,
+  file_id     TEXT NOT NULL REFERENCES uploads(file_id),
+  mount_path  TEXT NOT NULL,
+  PRIMARY KEY (session_id, file_id),
+  UNIQUE (session_id, mount_path)
 );
 -- Singleton: the one vault holding the mcp-fleet static_bearer credential,
 -- provisioned once (unlike agents/environments, vault creation has no
@@ -594,6 +615,83 @@ impl Db {
                    mcp_server_url = excluded.mcp_server_url,
                    synced_at = excluded.synced_at",
                 params![vault_id, credential_id, mcp_server_url, now()],
+            )?;
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct UploadRow {
+    pub file_id: String,
+    pub filename: String,
+    pub mime_type: String,
+    pub size_bytes: u64,
+}
+
+impl Db {
+    // ---- uploads
+
+    pub fn insert_upload(&self, u: &UploadRow) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO uploads (file_id, filename, mime_type, size_bytes, uploaded_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![u.file_id, u.filename, u.mime_type, u.size_bytes as i64, now()],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn upload(&self, file_id: &str) -> Result<Option<UploadRow>> {
+        self.with(|c| {
+            c.query_row(
+                "SELECT file_id, filename, mime_type, size_bytes FROM uploads WHERE file_id = ?1",
+                params![file_id],
+                |r| {
+                    Ok(UploadRow {
+                        file_id: r.get(0)?,
+                        filename: r.get(1)?,
+                        mime_type: r.get(2)?,
+                        size_bytes: r.get::<_, i64>(3)? as u64,
+                    })
+                },
+            )
+            .optional()
+        })
+    }
+
+    /// The path this file already has in this session, if it was mounted.
+    pub fn upload_mount(&self, session_id: &str, file_id: &str) -> Result<Option<String>> {
+        self.with(|c| {
+            c.query_row(
+                "SELECT mount_path FROM upload_mounts WHERE session_id = ?1 AND file_id = ?2",
+                params![session_id, file_id],
+                |r| r.get(0),
+            )
+            .optional()
+        })
+    }
+
+    /// Every mount path taken in this session.
+    pub fn upload_mount_paths(&self, session_id: &str) -> Result<Vec<String>> {
+        self.with(|c| {
+            c.prepare("SELECT mount_path FROM upload_mounts WHERE session_id = ?1")?
+                .query_map(params![session_id], |r| r.get(0))?
+                .collect()
+        })
+    }
+
+    pub fn insert_upload_mount(
+        &self,
+        session_id: &str,
+        file_id: &str,
+        mount_path: &str,
+    ) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT OR IGNORE INTO upload_mounts (session_id, file_id, mount_path) VALUES (?1, ?2, ?3)",
+                params![session_id, file_id, mount_path],
             )?;
             Ok(())
         })
