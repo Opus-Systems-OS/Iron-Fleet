@@ -681,7 +681,14 @@ mod tests {
             .as_ref()
             .expect("jarvis mounts the org");
         assert_eq!(gh.token_env, "JARVIS_GITHUB_READ_TOKEN");
-        assert!(gh.mount.iter().any(|m| m.ends_with("/Jarvis")));
+        assert!(gh
+            .mount
+            .iter()
+            .any(|m| m.ends_with("/Opus-Systems-OS-Quest")));
+        assert!(
+            !gh.mount.iter().any(|m| m.ends_with("/Jarvis")),
+            "private: the read token cannot clone it"
+        );
         assert!(gh.mount.iter().all(|m| is_github_repo_url(m)));
         assert_eq!(reg.environments["jarvis-lab"].kind().unwrap(), "cloud");
         assert_eq!(
