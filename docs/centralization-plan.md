@@ -19,6 +19,23 @@ Written for whichever machine picks this up next (Claude memory does not
 travel between machines; this section does). Everything below is verified
 fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–5 are complete.
 
+**2026-09-29: Tracks F and B deployed; stage 5 (Track W) in PRs.**
+- **Deployed, ~05:00 UTC:** Iron-Fleet #43 and #44, API #22, and J.A.R.V.I.S-Web #10 and
+  #11 (#11 was rebased onto the squashed #10).
+  - Every `/healthz` returns 200.
+  - `/v1/files*` is in the spec.
+  - The live bundle carries the attach and Jobs code.
+  - Agent versions roll at this boot sync; they were not checked from outside.
+- **Stage 5 PRs:** API #23 (`/v1/sources*`, `/v1/briefing`, OAuth,
+  `opus-api keys grant`) and J.A.R.V.I.S-Web #12 (the greeting from the briefing,
+  reminders, visits, and the tools `briefing`, `set_reminder`, `list_reminders` and
+  `cancel_reminder`).
+- **After deploying them:** `docker compose exec api opus-api keys grant --id 2e307b48
+  --scopes sources:read`. Weather works as soon as that is done.
+  - Google, WHOOP and Buffer each wait on the user's credentials in the droplet
+    `.env`.
+  - Then run `opus-api oauth start google|whoop` (see the API's `deploy/env.example`).
+
 **2026-09-28: Roblox parked; file uploads and BlueWeb-via-Jarvis built, not yet deployed.**
 The user parked Track R (branch `roblox-team` stays as is) to finish Jarvis and the fleet.
 The plan is `~/.claude/plans/zesty-toasting-micali.md` on the Mac. It has three tracks, in order:
