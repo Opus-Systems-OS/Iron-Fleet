@@ -19,6 +19,35 @@ Written for whichever machine picks this up next (Claude memory does not
 travel between machines; this section does). Everything below is verified
 fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–5 are complete.
 
+**2026-09-28: Roblox parked; file uploads and BlueWeb-via-Jarvis built, not yet deployed.**
+The user parked Track R (branch `roblox-team` stays as is) to finish Jarvis and the fleet.
+The plan is `~/.claude/plans/zesty-toasting-micali.md` on the Mac. It has three tracks, in order:
+
+- **F, file upload in the web chat.** PRs: Iron-Fleet #43, API #22, J.A.R.V.I.S-Web #10.
+  Deploy them in that order.
+  - Uploads go browser → BFF → API → control-plane `POST /files` → the Files API.
+  - The control plane records each id in `uploads`, and `attachments` must name one of
+    those ids. The Files API is workspace-wide, and its docs say never to accept file ids
+    from anywhere else.
+  - Uploads are mounted under `/mnt/session/uploads/`. Images and PDFs of 5 MB or less
+    also go into the message.
+  - Uploads get no expiry: a file referenced in a session's history that expires would
+    fail every later turn.
+  - Outputs come back via `GET /sessions/{id}/files`, as download links in the chat.
+- **B, BlueWeb coordinated by Jarvis.** PRs: Iron-Fleet #44 (prompts, merge after #43)
+  and J.A.R.V.I.S-Web #11 (stacked on #10).
+  - Jarvis dispatches with `start_session` after a spoken yes, and passes files by
+    `file_id`.
+  - mcp-fleet tags the sessions it starts `client: "jarvis"`.
+  - The HUD's Jobs panel announces when one of those sessions finishes or asks a
+    question, and gives Jarvis a `fleet_jobs` tool.
+- **W, web stage 5.** Weather and reminders first, then Google, WHOOP and Buffer.
+  **Not started:** stage 4's exit test is unconfirmed. Set the anchor to $9, unlock, and
+  it should warn out loud.
+- **Local gotcha.** An ignored `agents/skills/roblox-dev/scripts/blender/__pycache__/`
+  left over from `roblox-team` makes three registry tests fail on the Mac checkout. Delete
+  that directory; CI and the droplet are unaffected.
+
 **J.A.R.V.I.S. on the web: stage 1 live 2026-09-23 ~17:20 UTC.** The web client is
 the repo `Opus-Systems-OS/J.A.R.V.I.S-Web` (**public**; Mac checkout
 `~/code/J.A.R.V.I.S-Web`) at `https://jarvis.opustower.dev`. It is the `jarvis-web`
