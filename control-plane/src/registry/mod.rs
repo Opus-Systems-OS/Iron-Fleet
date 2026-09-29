@@ -676,7 +676,10 @@ mod tests {
         assert_eq!((cap("jarvis"), effort("jarvis")), (200, "medium"));
         assert_eq!(reg.agents["jarvis"].default_environment, "jarvis-lab");
         // Read-only token: repo mounts + `gh` on api.github.com, nothing else.
-        let gh = reg.agents["jarvis"].github.as_ref().expect("jarvis mounts the org");
+        let gh = reg.agents["jarvis"]
+            .github
+            .as_ref()
+            .expect("jarvis mounts the org");
         assert_eq!(gh.token_env, "JARVIS_GITHUB_READ_TOKEN");
         assert!(gh.mount.iter().any(|m| m.ends_with("/Jarvis")));
         assert!(gh.mount.iter().all(|m| is_github_repo_url(m)));
