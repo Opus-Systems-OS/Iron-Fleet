@@ -19,6 +19,27 @@ Written for whichever machine picks this up next (Claude memory does not
 travel between machines; this section does). Everything below is verified
 fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–5 are complete.
 
+**2026-09-30: two profiles on jarvis.opustower.dev (Mr. Walker, Mr. Powers).**
+Plan `~/.claude/plans/temporal-seeking-phoenix.md`. Roblox is tabled again.
+- Mr. Walker's profile is today's HUD, unchanged. Mr. Powers gets his own chats,
+  terminal and usage (billed to the same Anthropic account), and least privilege:
+  no BlueWeb, no WHOOP or briefing, no Systems tab, no credit ledger.
+- Enforced on the server in three places:
+  - API: keys limited to some agents (`keys create --agents`); his key reaches only
+    `jarvis-powers`.
+  - Here: `agents/jarvis-powers.json`, a Jarvis with no mcp-fleet, credentials or mounts.
+  - J.A.R.V.I.S-Web: per-profile password, key, allowed areas, reminders, visits
+    and mic lease.
+- **Deploy order:** API → Iron-Fleet (wait for the control-plane image; boot sync
+  creates `jarvis-powers`) → web.
+  - After the API: `docker compose exec api opus-api keys create --name web-powers
+    --scopes fleet:read,sessions:read,sessions:write,usage:read,voice --agents
+    jarvis-powers` → `.env` `WEB_POWERS_API_KEY`.
+  - He types a fresh password into `docker compose run --rm jarvis-web
+    hash-password` → `.env` `JARVIS_WEB_POWERS_PASSWORD_HASH='…'`.
+- When the Roblox studio lands: `opus-api keys agents --id <his key>
+  --agents jarvis-powers,jarvis-studio,…` and a Roblox-only dispatch path.
+
 **2026-09-29: Tracks F and B deployed; stage 5 (Track W) in PRs.**
 - **Deployed, ~05:00 UTC:** Iron-Fleet #43 and #44, API #22, and J.A.R.V.I.S-Web #10 and
   #11 (#11 was rebased onto the squashed #10).
