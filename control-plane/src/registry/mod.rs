@@ -883,6 +883,28 @@ mod tests {
     }
 
     #[test]
+    fn jarvis_powers_is_least_privilege() {
+        unsafe {
+            std::env::set_var("MCP_FLEET_URL", "https://mcp-fleet.internal.example/mcp");
+        }
+        let reg = load_dir(&repo_agents_dir()).unwrap();
+        let p = &reg.agents["jarvis-powers"];
+        assert_eq!(p.policy.max_list_cost_cents.get(), 200);
+        assert_eq!(p.agent.model.effort.unwrap().as_str(), "medium");
+        assert_eq!(p.default_environment, "jarvis-lab");
+        // Mr. Powers's Jarvis dispatches nothing and reads no repository:
+        // no mcp-fleet (so no start_session, no BlueWeb), no vault, no mounts.
+        assert!(p.agent.mcp_servers.is_empty(), "no fleet dispatch");
+        assert!(
+            p.agent.tools.iter().all(|t| t["type"] != "mcp_toolset"),
+            "no MCP toolsets"
+        );
+        assert!(p.credentials.is_empty(), "no secrets");
+        assert!(p.github.is_none(), "no repositories");
+        assert!(!p.agent.system.as_deref().unwrap_or("").contains("BlueWeb"));
+    }
+
+    #[test]
     fn committed_skill_loads_and_blueweb_client_references_it() {
         unsafe {
             std::env::set_var("MCP_FLEET_URL", "https://mcp-fleet.internal.example/mcp");
