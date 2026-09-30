@@ -35,8 +35,9 @@ Plan `~/.claude/plans/temporal-seeking-phoenix.md`. Roblox is tabled again.
   - After the API: `docker compose exec api opus-api keys create --name web-powers
     --scopes fleet:read,sessions:read,sessions:write,usage:read,voice --agents
     jarvis-powers` → `.env` `WEB_POWERS_API_KEY`.
-  - He types a fresh password into `docker compose run --rm jarvis-web
-    hash-password` → `.env` `JARVIS_WEB_POWERS_PASSWORD_HASH='…'`.
+  - He types a fresh password into `docker compose run --rm jarvis-web jarvis-web
+    hash-password` (the service, then the program: the image has no entrypoint)
+    → `.env` `JARVIS_WEB_POWERS_PASSWORD_HASH='…'`.
 - When the Roblox studio lands: `opus-api keys agents --id <his key>
   --agents jarvis-powers,jarvis-studio,…` and a Roblox-only dispatch path.
 
