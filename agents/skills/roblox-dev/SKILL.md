@@ -15,7 +15,7 @@ of every model.
 
 ## The team
 
-The session runs as **`jarvis-studio`**: Jarvis, directing. The three
+The session runs as **`jarvis-studio`**: Jarvis, directing. The four
 specialists on his roster share this sandbox and its filesystem.
 
 | Who | Owns | Never |
@@ -23,11 +23,13 @@ specialists on his roster share this sandbox and its filesystem.
 | **Jarvis (director)** | Scoping the task, delegating, reviewing all outputs against each other, the branch, the PR, the test publish, and the report to Mr. Walker | Writes large amounts of code or builds models himself |
 | **Game Designer** | `design/<feature>.md`: the mechanic, every number (in a table), player-facing text, edge cases, the models it needs (a short spec each), and what to playtest | Writes Luau or Blender scripts |
 | **3D Modeler** | `models/<name>/build.py`, then the `.fbx`/`.glb` exports, then `preview.png`, then the uploaded asset id in `asset.json` | Changes game code; ships a model over its triangle budget |
+| **VFX & Animation** | `vfx/<name>/` and `animations/<name>/`, made with VFXForge and MoonForge per `references/forge.md`: spec or plan, compiled or baked output, and `sheet.png` | Changes game code; runs a Forge path that calls an AI |
 | **Programmer** | Luau under `src/`, tunables in `src/shared/Config.luau`, asset ids in `src/shared/Assets.luau`, until `scripts/check.sh` passes | Changes a number the design fixed without saying so in the PR |
 
-**Order of work.** Design first. Once the design names a model, the Modeler and
-the Programmer work **in parallel**: the Programmer codes against
-`Assets.<Name>` and the Modeler fills in its id. Then Jarvis reviews, pushes
+**Order of work.** Design first. Once the design names a model, an effect or an
+animation, the Modeler, the VFX & Animation artist and the Programmer work
+**in parallel**: the Programmer codes against `Assets.<Name>` and the Modeler
+fills in its id. Then Jarvis reviews, pushes
 the branch, opens the PR, publishes to test, and reports.
 
 Send paths, not contents: "build the model specified in design/coins.md,
@@ -66,6 +68,10 @@ export PATH="$HOME/.local/bin:$PATH"
 blender --version                        # from the environment (cloud: apt 4.0; rig: see its image)
 ```
 
+Modeling with RoForge needs Blender 4.5: run `setup.sh --blender` instead. Forge
+(RoForge, VFXForge, MoonForge) is mounted at `/workspace/Forge`. Read
+`references/forge.md` before using it.
+
 The game repo is mounted at `/workspace/<repo>`, with `GH_TOKEN` preset
 for `gh`. `studio.json` at the repo root holds the test place's ids and the
 asset creator.
@@ -97,6 +103,14 @@ silhouette matches the spec. Re-uploading an unchanged file is a no-op. Add
 the id to `src/shared/Assets.luau` as `Assets.<Name> = "rbxassetid://<id>"`,
 or tell the Programmer to.
 
+### 3b. Effects and animations (VFX & Animation)
+
+When the design asks for an effect or an animation, follow
+`references/forge.md`: write `vfx/<name>/spec.json` or
+`animations/<name>/plan.json`, build it, look at `sheet.png`, and iterate. Nothing
+here can put them into the place; they ship in the PR for Mr. Walker to import
+in Studio.
+
 ### 4. Implement (Programmer)
 
 The layout is in `references/luau-conventions.md`. Iterate until the checks
@@ -121,6 +135,7 @@ The PR body contains:
 - what was built;
 - each model with its preview image (link the file on the branch), triangle
   count and asset id;
+- each effect and animation with its sheet, marked "import in Studio";
 - any deviation from the design;
 - how to playtest, with steps and what you should see;
 - the last line of the check output.
