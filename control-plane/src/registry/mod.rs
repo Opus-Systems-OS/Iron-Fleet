@@ -675,6 +675,27 @@ mod tests {
         let effort = |s: &str| reg.agents[s].agent.model.effort.unwrap().as_str();
         assert_eq!((cap("jarvis"), effort("jarvis")), (200, "medium"));
         assert_eq!(reg.agents["jarvis"].default_environment, "jarvis-lab");
+        // The Roblox studio: Jarvis directs three specialists, one $10 budget,
+        // Blender in the cloud sandbox by default.
+        let studio = &reg.agents["jarvis-studio"];
+        assert_eq!(
+            (cap("jarvis-studio"), studio.default_environment.as_str()),
+            (1000, "roblox-dev")
+        );
+        let roster = studio.agent.multiagent.as_ref().unwrap()["agents"]
+            .as_array()
+            .unwrap();
+        let members: Vec<&str> = roster.iter().filter_map(|e| e["slug"].as_str()).collect();
+        assert_eq!(
+            members,
+            ["roblox-designer", "roblox-modeler", "roblox-programmer"]
+        );
+        assert!(
+            members
+                .iter()
+                .all(|m| reg.agents[*m].credentials.is_empty()),
+            "members share the studio's vault"
+        );
         // Read-only token: repo mounts + `gh` on api.github.com, nothing else.
         let gh = reg.agents["jarvis"]
             .github
@@ -880,6 +901,32 @@ mod tests {
         let err = load_dir(&dir).unwrap_err().to_string();
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(err.contains("greater than zero"), "{err}");
+    }
+
+    #[test]
+    fn the_roblox_studio_works_on_steal_a_train() {
+        unsafe {
+            std::env::set_var("MCP_FLEET_URL", "https://mcp-fleet.internal.example/mcp");
+        }
+        let reg = load_dir(&repo_agents_dir()).unwrap();
+        let studio = &reg.agents["jarvis-studio"];
+        assert_eq!(studio.policy.max_list_cost_cents.get(), 1000);
+        assert_eq!(studio.default_environment, "roblox-dev");
+        let gh = studio.github.as_ref().expect("the studio mounts its game");
+        assert_eq!(gh.token_env, "ROBLOX_GITHUB_TOKEN");
+        assert_eq!(
+            gh.mount,
+            ["https://github.com/Opus-Systems-OS/Steal-A-Train"]
+        );
+        let keys: Vec<&str> = studio.credentials.iter().map(|c| c.key()).collect();
+        assert_eq!(keys, ["GH_TOKEN", "ROBLOX_PUBLISH_KEY", "ROBLOX_ASSET_KEY"]);
+        for member in ["roblox-designer", "roblox-modeler", "roblox-programmer"] {
+            assert_eq!(
+                reg.agents[member].default_environment, "roblox-dev",
+                "{member}"
+            );
+        }
+        assert!(reg.skills.contains_key("roblox-dev"));
     }
 
     #[test]
