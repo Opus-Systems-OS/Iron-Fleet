@@ -7,8 +7,17 @@
 # on PATH. Why not rokit: it resolves versions through the GitHub API, which
 # the sandbox hits unauthenticated and gets rate-limited on.
 #
-#   bash <skill dir>/scripts/setup.sh        # idempotent; re-run is a no-op
+#   bash <skill dir>/scripts/setup.sh            # idempotent; re-run is a no-op
+#   bash <skill dir>/scripts/setup.sh --blender  # also Blender 4.5 LTS (~380 MB)
+#
+# --blender: RoForge needs Blender 4.2+, and the environment's apt blender is
+# 4.0. The official LTS tarball goes to ~/.local/opt and `blender` in
+# ~/.local/bin points at it, so it wins over apt on PATH — blender-run.sh and
+# render-preview.sh use it too. Only modeling jobs need it.
 set -euo pipefail
+
+BLENDER=0
+[ "${1:-}" = "--blender" ] && BLENDER=1
 
 BIN="$HOME/.local/bin"
 mkdir -p "$BIN"
@@ -35,6 +44,20 @@ for line in "${TOOLS[@]}"; do
   unzip -oq "$tmp/$name.zip" -d "$tmp/$name"
   install -m 0755 "$tmp/$name/$name" "$BIN/$name"
 done
+
+if [ "$BLENDER" = 1 ]; then
+  bver=4.5.14
+  bdir="$HOME/.local/opt/blender-$bver-linux-x64"
+  bsha=9ba871ff2ecd36526b77432745980b7e6664ecd0c7ca11c48849073dcfe06da3
+  if [ ! -x "$bdir/blender" ]; then
+    curl -fsSL "https://download.blender.org/release/Blender4.5/blender-$bver-linux-x64.tar.xz" -o "$tmp/blender.tar.xz"
+    echo "$bsha  $tmp/blender.tar.xz" | sha256sum -c --quiet -
+    mkdir -p "$HOME/.local/opt"
+    tar xJf "$tmp/blender.tar.xz" -C "$HOME/.local/opt"
+  fi
+  ln -sf "$bdir/blender" "$BIN/blender"
+  printf '%-9s %s\n' blender "$("$BIN/blender" --version 2>/dev/null | head -1)"
+fi
 
 for t in rojo selene stylua luau-lsp; do
   printf '%-9s %s\n' "$t" "$("$BIN/$t" --version 2>&1 | head -1)"

@@ -675,7 +675,7 @@ mod tests {
         let effort = |s: &str| reg.agents[s].agent.model.effort.unwrap().as_str();
         assert_eq!((cap("jarvis"), effort("jarvis")), (200, "medium"));
         assert_eq!(reg.agents["jarvis"].default_environment, "jarvis-lab");
-        // The Roblox studio: Jarvis directs three specialists, one $35 budget,
+        // The Roblox studio: Jarvis directs four specialists, one $35 budget,
         // Blender in the cloud sandbox by default.
         let studio = &reg.agents["jarvis-studio"];
         assert_eq!(
@@ -688,7 +688,12 @@ mod tests {
         let members: Vec<&str> = roster.iter().filter_map(|e| e["slug"].as_str()).collect();
         assert_eq!(
             members,
-            ["roblox-designer", "roblox-modeler", "roblox-programmer"]
+            [
+                "roblox-designer",
+                "roblox-modeler",
+                "roblox-vfx-animator",
+                "roblox-programmer"
+            ]
         );
         assert!(
             members
@@ -916,11 +921,19 @@ mod tests {
         assert_eq!(gh.token_env, "ROBLOX_GITHUB_TOKEN");
         assert_eq!(
             gh.mount,
-            ["https://github.com/Opus-Systems-OS/Steal-A-Train"]
+            [
+                "https://github.com/Opus-Systems-OS/Steal-A-Train",
+                "https://github.com/Opus-Systems-OS/Forge"
+            ]
         );
         let keys: Vec<&str> = studio.credentials.iter().map(|c| c.key()).collect();
         assert_eq!(keys, ["GH_TOKEN", "ROBLOX_PUBLISH_KEY", "ROBLOX_ASSET_KEY"]);
-        for member in ["roblox-designer", "roblox-modeler", "roblox-programmer"] {
+        for member in [
+            "roblox-designer",
+            "roblox-modeler",
+            "roblox-vfx-animator",
+            "roblox-programmer",
+        ] {
             assert_eq!(
                 reg.agents[member].default_environment, "roblox-dev",
                 "{member}"
