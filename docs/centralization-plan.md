@@ -19,6 +19,43 @@ Written for whichever machine picks this up next (Claude memory does not
 travel between machines; this section does). Everything below is verified
 fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–5 are complete.
 
+**▶ RIGHT NOW (2026-09-30 ~23:30 UTC, handing off Mac → Windows): Track R going live.**
+Read this block first; it is the whole state of the session that moved machines.
+- **Done today:** web profiles are **live and both logins confirmed** (entry below).
+  Docs fixes IF #48 / web #15 (`docker compose run --rm jarvis-web jarvis-web hash-password`).
+- **Track R is back on.** The user pasted AR1P-D's handoff: Forge `docs/sync.md`, branch
+  `docs/claude-md-and-sync`, entry 2026-09-30 (game **Steal-A-Train**, group JAPSTUDIOS
+  36045468, universe 10768677816, place 90214722846613, private repo
+  `Opus-Systems-OS/Steal-A-Train`, CI publishes `main`, version 5 live).
+- **PR #49 (`roblox-team` → main), open, not merged:** main merged in (conflict in
+  `agents/jarvis.json` resolved: main's prompt + Roblox handoff, which now asks for a yes
+  before a $10 studio job), `jarvis-studio` mounts Steal-A-Train, CLAUDE.md rows for the
+  four studio agents, a registry test pinning the studio config. 84 control-plane tests pass.
+  After this note lands on main, merge main into `roblox-team` again (this block conflicts).
+- **Droplet `.env`:** `ROBLOX_GITHUB_TOKEN` added (classic PAT, `repo`). `ROBLOX_PUBLISH_KEY`
+  and `ROBLOX_ASSET_KEY` are set **but are probably the user's alt's keys** → publishing to
+  the group's game will fail. Fix: swap in the automation account's keys from AR1P-D (same
+  names), or add the alt to JAPSTUDIOS with edit rights and a key scoped to Steal-A-Train.
+- **Next, in order:** (1) keys swapped; (2) merge #49; (3) wait for the control-plane image
+  (`gh run list -R Opus-Systems-OS/Iron-Fleet --branch main`), then the user runs
+  `deploy.sh`; (4) user pastes `docker compose logs --tail 60 control-plane` — expect the
+  `roblox-dev` env, the skill and jarvis-studio + roblox-designer/-modeler/-programmer
+  created, no "needs … set" errors; (5) write a dated entry at the top of Forge
+  `docs/sync.md` on `docs/claude-md-and-sync` (what changed, PR link, boot-sync result —
+  never key values); (6) smoke test **only if the user OKs up to $10** (no $2 cap exists):
+  a jarvis-studio session, "add a sign at the spawn that says Welcome to Steal-A-Train" →
+  a PR in Steal-A-Train + a test publish; (7) then
+  `opus-api keys agents --id <web-powers key id> --agents jarvis-powers,jarvis-studio`
+  so Mr. Powers's profile gets the Roblox part of the fleet.
+- **Open with the user:** Mr. Powers's PC (AR1P-D) is now on the tailnet; both PCs stay on
+  as shared compute and Roblox Studio hosts. Offered a Tailscale ACL (his PC → droplet and
+  rig Ollama only, not the Mac) — not decided. Cloud agents can't reach a local Studio;
+  a Studio bridge over the tailnet is a later design, not started. Blender/RoForge in
+  `roblox-dev` (sync.md 5.1–5.4) is later too.
+- **How this user works:** plan first for real features; the user runs SSH/deploys
+  (Claude's auto mode can't reach the droplet); never type or store a real passphrase;
+  headless Chrome always with `--use-fake-device-for-media-stream`.
+
 **2026-09-30: two profiles on jarvis.opustower.dev (Mr. Walker, Mr. Powers).**
 Plan `~/.claude/plans/temporal-seeking-phoenix.md`. Roblox is tabled again.
 - Mr. Walker's profile is today's HUD, unchanged. Mr. Powers gets his own chats,
