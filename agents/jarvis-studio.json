@@ -2,7 +2,7 @@
   "slug": "jarvis-studio",
   "default_environment": "roblox-dev",
   "policy": {
-    "max_list_cost_cents": "1000"
+    "max_list_cost_cents": "3500"
   },
   "credentials": [
     {

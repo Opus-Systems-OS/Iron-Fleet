@@ -56,7 +56,7 @@ finishes, so final cost lands slightly over.
 | `blueweb-ops` | `"200"` | medium | Contracts, admin; no code tools |
 | `gpu-compute` | `"500"` | medium | Runs on `rig-gpu` |
 | `jarvis-powers` | `"200"` | medium | Mr. Powers's Jarvis (the web HUD's second profile): `jarvis-lab` sandbox, no mcp-fleet, no GitHub, no credentials |
-| `jarvis-studio` | `"1000"` | medium | Coordinator of the Roblox studio on `Opus-Systems-OS/Steal-A-Train` (`roblox-dev`); PRs and test-place publishes only |
+| `jarvis-studio` | `"3500"` | medium | Coordinator of the Roblox studio on `Opus-Systems-OS/Steal-A-Train` (`roblox-dev`); PRs and test-place publishes only |
 | `roblox-designer` | `"500"` | medium | Studio member: design docs (Opus 5.5) |
 | `roblox-modeler` | `"500"` | high | Studio member: Blender models, uploaded to Roblox (Opus 5.5) |
 | `roblox-programmer` | `"500"` | high | Studio member: Luau (Opus 5.5) |
