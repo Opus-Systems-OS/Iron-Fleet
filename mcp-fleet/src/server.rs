@@ -33,6 +33,11 @@ pub struct StartSessionArgs {
     /// mounted; only agents with GitHub access configured accept this.
     #[serde(default)]
     pub repositories: Vec<String>,
+    /// Files to hand over, by the `file_id` shown in an "Attached files"
+    /// line of a message you received (e.g. the logo or photos for a site).
+    /// Each is mounted read-only in the new session's sandbox. At most 10.
+    #[serde(default)]
+    pub attachments: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -47,6 +52,23 @@ pub struct SendEventArgs {
     pub session_id: String,
     /// The follow-up message to append to the running session.
     pub task: String,
+    /// As on `start_session`: `file_id`s from an "Attached files" line.
+    #[serde(default)]
+    pub attachments: Vec<String>,
+}
+
+/// The control plane's `POST /sessions` body. Every session started here is
+/// tagged `client: "jarvis"` (metadata `iron_fleet_client`), which is how a
+/// client finds the jobs jarvis dispatched.
+fn start_body(args: StartSessionArgs) -> serde_json::Value {
+    serde_json::json!({
+        "agent_slug": args.agent_slug,
+        "task": args.task,
+        "environment": args.environment,
+        "repositories": args.repositories,
+        "attachments": args.attachments,
+        "client": "jarvis",
+    })
 }
 
 /// What jarvis gets back from `get_session_status`: the handful of fields
@@ -150,13 +172,7 @@ impl FleetServer {
         &self,
         Parameters(args): Parameters<StartSessionArgs>,
     ) -> Result<String, String> {
-        let body = serde_json::json!({
-            "agent_slug": args.agent_slug,
-            "task": args.task,
-            "environment": args.environment,
-            "repositories": args.repositories,
-        });
-        self.client.post("/sessions", &body).await
+        self.client.post("/sessions", &start_body(args)).await
     }
 
     #[tool(
@@ -186,10 +202,14 @@ impl FleetServer {
     #[tool(description = "Send a follow-up message to a running session.")]
     async fn send_event(
         &self,
-        Parameters(SendEventArgs { session_id, task }): Parameters<SendEventArgs>,
+        Parameters(SendEventArgs {
+            session_id,
+            task,
+            attachments,
+        }): Parameters<SendEventArgs>,
     ) -> Result<String, String> {
         let id = valid_session_id(&session_id)?;
-        let body = serde_json::json!({ "task": task });
+        let body = serde_json::json!({ "task": task, "attachments": attachments });
         self.client
             .post(&format!("/sessions/{id}/events"), &body)
             .await
@@ -227,6 +247,20 @@ mod tests {
 
     /// CLAUDE.md's closed list. If this test has to change, that is a
     /// CLAUDE.md change first.
+    #[test]
+    fn started_sessions_are_tagged_and_carry_attachments() {
+        let args: StartSessionArgs = serde_json::from_value(serde_json::json!({
+            "agent_slug": "blueweb-ops",
+            "task": "summarize",
+            "attachments": ["file_1"]
+        }))
+        .unwrap();
+        let body = start_body(args);
+        assert_eq!(body["client"], "jarvis");
+        assert_eq!(body["attachments"], serde_json::json!(["file_1"]));
+        assert_eq!(body["repositories"], serde_json::json!([]));
+    }
+
     #[test]
     fn exactly_the_five_jarvis_tools() {
         let mut names: Vec<String> = FleetServer::tool_router()

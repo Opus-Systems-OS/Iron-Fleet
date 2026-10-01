@@ -19,6 +19,74 @@ Written for whichever machine picks this up next (Claude memory does not
 travel between machines; this section does). Everything below is verified
 fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–5 are complete.
 
+**2026-09-30: two profiles on jarvis.opustower.dev (Mr. Walker, Mr. Powers).**
+Plan `~/.claude/plans/temporal-seeking-phoenix.md`. Roblox is tabled again.
+- Mr. Walker's profile is today's HUD, unchanged. Mr. Powers gets his own chats,
+  terminal and usage (billed to the same Anthropic account), and least privilege:
+  no BlueWeb, no WHOOP or briefing, no Systems tab, no credit ledger.
+- Enforced on the server in three places:
+  - API: keys limited to some agents (`keys create --agents`); his key reaches only
+    `jarvis-powers`.
+  - Here: `agents/jarvis-powers.json`, a Jarvis with no mcp-fleet, credentials or mounts.
+  - J.A.R.V.I.S-Web: per-profile password, key, allowed areas, reminders, visits
+    and mic lease.
+- **Deploy order:** API → Iron-Fleet (wait for the control-plane image; boot sync
+  creates `jarvis-powers`) → web.
+  - After the API: `docker compose exec api opus-api keys create --name web-powers
+    --scopes fleet:read,sessions:read,sessions:write,usage:read,voice --agents
+    jarvis-powers` → `.env` `WEB_POWERS_API_KEY`.
+  - He types a fresh password into `docker compose run --rm jarvis-web jarvis-web
+    hash-password` (the service, then the program: the image has no entrypoint)
+    → `.env` `JARVIS_WEB_POWERS_PASSWORD_HASH='…'`.
+- When the Roblox studio lands: `opus-api keys agents --id <his key>
+  --agents jarvis-powers,jarvis-studio,…` and a Roblox-only dispatch path.
+
+**2026-09-29: Tracks F and B deployed; stage 5 (Track W) in PRs.**
+- **Deployed, ~05:00 UTC:** Iron-Fleet #43 and #44, API #22, and J.A.R.V.I.S-Web #10 and
+  #11 (#11 was rebased onto the squashed #10).
+  - Every `/healthz` returns 200.
+  - `/v1/files*` is in the spec.
+  - The live bundle carries the attach and Jobs code.
+  - Agent versions roll at this boot sync; they were not checked from outside.
+- **Stage 5 PRs:** API #23 (`/v1/sources*`, `/v1/briefing`, OAuth,
+  `opus-api keys grant`) and J.A.R.V.I.S-Web #12 (the greeting from the briefing,
+  reminders, visits, and the tools `briefing`, `set_reminder`, `list_reminders` and
+  `cancel_reminder`).
+- **After deploying them:** `docker compose exec api opus-api keys grant --id 2e307b48
+  --scopes sources:read`. Weather works as soon as that is done.
+  - Google, WHOOP and Buffer each wait on the user's credentials in the droplet
+    `.env`.
+  - Then run `opus-api oauth start google|whoop` (see the API's `deploy/env.example`).
+
+**2026-09-28: Roblox parked; file uploads and BlueWeb-via-Jarvis built, not yet deployed.**
+The user parked Track R (branch `roblox-team` stays as is) to finish Jarvis and the fleet.
+The plan is `~/.claude/plans/zesty-toasting-micali.md` on the Mac. It has three tracks, in order:
+
+- **F, file upload in the web chat.** PRs: Iron-Fleet #43, API #22, J.A.R.V.I.S-Web #10.
+  Deploy them in that order.
+  - Uploads go browser → BFF → API → control-plane `POST /files` → the Files API.
+  - The control plane records each id in `uploads`, and `attachments` must name one of
+    those ids. The Files API is workspace-wide, and its docs say never to accept file ids
+    from anywhere else.
+  - Uploads are mounted under `/mnt/session/uploads/`. Images and PDFs of 5 MB or less
+    also go into the message.
+  - Uploads get no expiry: a file referenced in a session's history that expires would
+    fail every later turn.
+  - Outputs come back via `GET /sessions/{id}/files`, as download links in the chat.
+- **B, BlueWeb coordinated by Jarvis.** PRs: Iron-Fleet #44 (prompts, merge after #43)
+  and J.A.R.V.I.S-Web #11 (stacked on #10).
+  - Jarvis dispatches with `start_session` after a spoken yes, and passes files by
+    `file_id`.
+  - mcp-fleet tags the sessions it starts `client: "jarvis"`.
+  - The HUD's Jobs panel announces when one of those sessions finishes or asks a
+    question, and gives Jarvis a `fleet_jobs` tool.
+- **W, web stage 5.** Weather and reminders first, then Google, WHOOP and Buffer.
+  **Not started:** stage 4's exit test is unconfirmed. Set the anchor to $9, unlock, and
+  it should warn out loud.
+- **Local gotcha.** An ignored `agents/skills/roblox-dev/scripts/blender/__pycache__/`
+  left over from `roblox-team` makes three registry tests fail on the Mac checkout. Delete
+  that directory; CI and the droplet are unaffected.
+
 **J.A.R.V.I.S. on the web: stage 1 live 2026-09-23 ~17:20 UTC.** The web client is
 the repo `Opus-Systems-OS/J.A.R.V.I.S-Web` (**public**; Mac checkout
 `~/code/J.A.R.V.I.S-Web`) at `https://jarvis.opustower.dev`. It is the `jarvis-web`
@@ -75,6 +143,61 @@ Voice incident, found live:
   through the always-open follow-up window.
 - Fixed in #3: the follow-up opens only after a question, once in a row, with ≥ 2 words.
 - Headless tests must use `--use-fake-device-for-media-stream`.
+
+**Voice fixes, 2026-09-24 ~04:15 UTC** (J.A.R.V.I.S-Web #7, #8):
+- **The focused HUD takes the mic.** It claims on unlock and on window focus. A HUD
+  without the mic says so.
+- **Requests are assembled across pauses.** After the wake word, phrases are collected
+  until 1.3 s of quiet, and speech in progress holds the request open. Before this,
+  long sentences reached Jarvis as their first clause only. The same request within
+  4 s is sent once.
+- **Arc needs hardware (graphics) acceleration on** for cloud ears. Without it, capture
+  starves; the user found this.
+- **Debugging voice:** use the API's `voice transcribe` log lines (bytes, duration,
+  chars; never the words) plus the session's `user.message` events.
+
+**Next:**
+- **Web stage 4** (Usage tab, Fish credit, Anthropic balance ledger, spoken warnings).
+- **Waiting on the user:**
+  - the org's approval of the `jarvis-read` token (the private repo mounts);
+  - the Roblox inputs (the game name, the three keys, the plugin link). Track R is on
+    branch `roblox-team`.
+
+**Web stage 3 deployed 2026-09-24 ~03:30 UTC** (J.A.R.V.I.S-Web #6, API #20):
+- **Fleet tab:** agents with Start, sessions, and an inspector with message/interrupt.
+- **Systems tab:** a live SVG map. Clients come from the new `GET /v1/clients`
+  (key names plus last use, scope `ops:read`); droplet services from Docker; the rig
+  from Tailscale plus Ollama; external services from ops.
+- **Terminal tab:** the jarvis sandbox. Terminal turns are silent.
+- **Mic lease:** `jarvis-web` `/web/mic`, 20 s, memory only. Only one open HUD listens
+  and speaks the greeting; an orb click takes over. Found live: two open HUDs each
+  answered the same question.
+- **Checked headless against live:** every tab, 17 map nodes, a terminal
+  `ls /workspace`.
+- **Deferred with Track R:** the studio thread view.
+
+**Voice verified by the user, 2026-09-23 evening:**
+- **Chrome:** the browser's own speech recognition.
+- **Arc:** "cloud ears". The page detects utterances and sends 16 kHz WAV to the
+  API's `/v1/voice/transcribe`, which uses Fish speech-to-text at $0.36 per audio hour.
+  - It is picked automatically after the browser engine fails 3×, and remembered
+    per browser.
+  - PRs: J.A.R.V.I.S-Web #4 and #5, API #19.
+
+**The Roblox studio (Track R, revised 2026-09-23 evening):** Jarvis directs.
+- **`jarvis-studio`**: Jarvis's persona, the coordinator, `"1000"`. Its roster is
+  `roblox-designer`, `roblox-modeler` and `roblox-programmer`, all Opus 5.5.
+- **Handoff:** jarvis passes Roblox work to it with `start_session`, using `rig-gpu`
+  only when the user says he is on Windows.
+- **Models are Blender scripts:** `models/<name>/build.py` → FBX/GLB + preview → an
+  Open Cloud Assets upload.
+- **Spike:** apt Blender 4.0 works in the cloud sandbox with `python3-numpy`. The
+  512 px Cycles CPU preview takes about 2 s, with no denoiser.
+- **Where it is:** everything is on branch `roblox-team`, *not merged*. It waits on the
+  game repo name, `ROBLOX_GITHUB_TOKEN`, `ROBLOX_PUBLISH_KEY`, `ROBLOX_ASSET_KEY` plus
+  the creator id, and the friend's Blender plugin. Boot sync fails loudly on a missing
+  credential env var, so the agent files cannot land before the keys.
+- **Superseded:** the Sonnet `roblox-director` design below.
 
 The Roblox dev team (Track R, decided 2026-09-23):
 - Agents: `roblox-director` (Sonnet 5, coordinator), with `roblox-designer` and

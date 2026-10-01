@@ -2,7 +2,7 @@
 //! including the live event stream — are proxied to the Managed Agents API
 //! and passed through unchanged.
 
-use super::AppState;
+use super::{files, AppState};
 use crate::anthropic::types::{
     AgentRef, Budget, CustomTool, SessionCreate, SessionEvent, SessionResource,
 };
@@ -65,6 +65,11 @@ pub struct CreateRequest {
     /// `model` override replaces the agent's model object in full.
     #[serde(default)]
     pub model: Option<String>,
+    /// Ids from `POST /files`, at most 10: mounted read-only under
+    /// `/mnt/session/uploads/`, small images and PDFs also shown to the model
+    /// in the first message. With attachments, `task` may be empty.
+    #[serde(default)]
+    pub attachments: Vec<String>,
 }
 
 const SYSTEM_SUFFIX_MAX_CHARS: usize = 4_000;
@@ -172,10 +177,8 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<CreateResponse>)> {
     // Route axum's body rejection through our JSON error shape instead of its plain-text 422.
     let Json(req) = body.map_err(|e| Error::InvalidRequest(e.body_text()))?;
-    let task = req.task.trim();
-    if task.is_empty() {
-        return Err(Error::InvalidRequest("task must not be empty".into()));
-    }
+    let task = task_or_default(&req.task, &req.attachments)?;
+    let attached = files::resolve(&state, None, &req.attachments)?;
 
     let agent = state
         .db
@@ -193,7 +196,8 @@ pub async fn create(
         .environment_id
         .ok_or_else(|| Error::EnvironmentNotProvisioned(env_slug.clone()))?;
 
-    let resources = github_resources(&state, &agent.slug, &req.repositories)?;
+    let mut resources = github_resources(&state, &agent.slug, &req.repositories)?;
+    resources.extend(attached.iter().map(files::resource));
 
     // The fleet-wide mcp-fleet vault (harmless on an agent with no
     // mcp_servers entry: a vault credential only applies to a server the
@@ -217,13 +221,20 @@ pub async fn create(
         environment_id: environment_id.clone(),
         title: Some(title_from(task)),
         budget: Budget::limit(agent.max_list_cost_cents),
-        initial_events: vec![SessionEvent::text(task)],
+        initial_events: vec![SessionEvent::user_message(files::message_blocks(
+            task, &attached,
+        ))],
         metadata: session_metadata(&agent.slug, &env_slug, req.client.as_deref())?,
         vault_ids,
         resources,
     };
 
     let session = state.api.create_session(&body).await?;
+    for a in &attached {
+        state
+            .db
+            .insert_upload_mount(&session.id, &a.upload.file_id, &a.mount_path)?;
+    }
     tracing::info!(
         slug = %agent.slug,
         session = %session.id,
@@ -232,6 +243,7 @@ pub async fn create(
         cap_cents = %agent.max_list_cost_cents,
         repositories = body.resources.len(),
         custom_tools = req.tools.len(),
+        attachments = attached.len(),
         system_suffix = req.system_suffix.is_some(),
         model = body.agent.model.as_ref().and_then(|m| m["id"].as_str()).unwrap_or("agent's own"),
         "session created"
@@ -480,7 +492,13 @@ pub async fn get(State(state): State<AppState>, Path(id): Path<String>) -> Resul
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SendEventRequest {
+    #[serde(default)]
     pub task: String,
+    /// As on create: ids from `POST /files`. Mounted into the running
+    /// session first (a file already mounted keeps its path), then the
+    /// message carries them.
+    #[serde(default)]
+    pub attachments: Vec<String>,
 }
 
 pub async fn send_event(
@@ -494,15 +512,24 @@ pub async fn send_event(
         ));
     }
     let Json(req) = body.map_err(|e| Error::InvalidRequest(e.body_text()))?;
-    let task = req.task.trim();
-    if task.is_empty() {
-        return Err(Error::InvalidRequest("task must not be empty".into()));
+    let task = task_or_default(&req.task, &req.attachments)?;
+    let attached = files::resolve(&state, Some(&id), &req.attachments)?;
+    for a in attached.iter().filter(|a| a.new) {
+        state.api.add_resource(&id, &files::resource(a)).await?;
+        state
+            .db
+            .insert_upload_mount(&id, &a.upload.file_id, &a.mount_path)?;
     }
     let result = state
         .api
-        .send_events(&id, vec![SessionEvent::text(task)])
+        .send_events(
+            &id,
+            vec![SessionEvent::user_message(files::message_blocks(
+                task, &attached,
+            ))],
+        )
         .await?;
-    tracing::info!(session = %id, "event sent");
+    tracing::info!(session = %id, attachments = attached.len(), "event sent");
     Ok(Json(result))
 }
 
@@ -631,6 +658,15 @@ pub async fn stream(
         .header("x-accel-buffering", "no")
         .body(Body::from_stream(upstream.bytes_stream()))
         .map_err(|e| Error::Config(format!("stream response: {e}")))
+}
+
+/// The trimmed task; with attachments and no words, a stock one.
+fn task_or_default<'a>(task: &'a str, attachments: &[String]) -> Result<&'a str> {
+    match task.trim() {
+        "" if attachments.is_empty() => Err(Error::InvalidRequest("task must not be empty".into())),
+        "" => Ok(files::DEFAULT_TASK),
+        t => Ok(t),
+    }
 }
 
 fn title_from(task: &str) -> String {

@@ -55,6 +55,7 @@ finishes, so final cost lands slightly over.
 | `blueweb-client` | `"1000"` | high | Billable client code work |
 | `blueweb-ops` | `"200"` | medium | Contracts, admin; no code tools |
 | `gpu-compute` | `"500"` | medium | Runs on `rig-gpu` |
+| `jarvis-powers` | `"200"` | medium | Mr. Powers's Jarvis (the web HUD's second profile): `jarvis-lab` sandbox, no mcp-fleet, no GitHub, no credentials |
 
 Per-session caps do not stop fifty sessions. Workspace- and agent-level caps
 with alerts are configured in the Console as a backstop, not in this repo.
