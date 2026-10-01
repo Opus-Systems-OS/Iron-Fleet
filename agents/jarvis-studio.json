@@ -35,7 +35,7 @@
   "github": {
     "token_env": "ROBLOX_GITHUB_TOKEN",
     "mount": [
-      "https://github.com/Opus-Systems-OS/GAME-REPO-TBD"
+      "https://github.com/Opus-Systems-OS/Steal-A-Train"
     ]
   },
   "agent": {
