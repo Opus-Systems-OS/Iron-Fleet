@@ -904,6 +904,32 @@ mod tests {
     }
 
     #[test]
+    fn the_roblox_studio_works_on_steal_a_train() {
+        unsafe {
+            std::env::set_var("MCP_FLEET_URL", "https://mcp-fleet.internal.example/mcp");
+        }
+        let reg = load_dir(&repo_agents_dir()).unwrap();
+        let studio = &reg.agents["jarvis-studio"];
+        assert_eq!(studio.policy.max_list_cost_cents.get(), 1000);
+        assert_eq!(studio.default_environment, "roblox-dev");
+        let gh = studio.github.as_ref().expect("the studio mounts its game");
+        assert_eq!(gh.token_env, "ROBLOX_GITHUB_TOKEN");
+        assert_eq!(
+            gh.mount,
+            ["https://github.com/Opus-Systems-OS/Steal-A-Train"]
+        );
+        let keys: Vec<&str> = studio.credentials.iter().map(|c| c.key()).collect();
+        assert_eq!(keys, ["GH_TOKEN", "ROBLOX_PUBLISH_KEY", "ROBLOX_ASSET_KEY"]);
+        for member in ["roblox-designer", "roblox-modeler", "roblox-programmer"] {
+            assert_eq!(
+                reg.agents[member].default_environment, "roblox-dev",
+                "{member}"
+            );
+        }
+        assert!(reg.skills.contains_key("roblox-dev"));
+    }
+
+    #[test]
     fn jarvis_powers_is_least_privilege() {
         unsafe {
             std::env::set_var("MCP_FLEET_URL", "https://mcp-fleet.internal.example/mcp");

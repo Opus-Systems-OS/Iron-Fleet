@@ -19,6 +19,20 @@ Written for whichever machine picks this up next (Claude memory does not
 travel between machines; this section does). Everything below is verified
 fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–5 are complete.
 
+**2026-09-30 (later): Track R back on — the Roblox studio on Steal-A-Train.**
+AR1P-D's handoff is Forge `docs/sync.md` (branch `docs/claude-md-and-sync`), 2026-09-30.
+- Game: Steal-A-Train, group JAPSTUDIOS (36045468), universe 10768677816, place
+  90214722846613. Repo `Opus-Systems-OS/Steal-A-Train` (private, Rojo, `studio.json`
+  filled in; its CI checks PRs and publishes `main`).
+- `roblox-team` merged with main; `jarvis-studio` mounts Steal-A-Train. Jarvis asks
+  before a studio job ($10 cap), as for BlueWeb.
+- Droplet `.env` has `ROBLOX_GITHUB_TOKEN` (classic PAT, `repo`), `ROBLOX_PUBLISH_KEY`
+  and `ROBLOX_ASSET_KEY` (a dedicated automation account in JAPSTUDIOS, not a group key).
+- Still open: Blender/RoForge in `roblox-dev` (sync.md 5.1–5.4); whether a user-key
+  upload with `creator: {groupId}` lands group-owned (first `upload-asset.sh` run);
+  Mr. Powers's web key gets the studio agents once they're live
+  (`opus-api keys agents --id <id> --agents jarvis-powers,jarvis-studio`).
+
 **2026-09-30: two profiles on jarvis.opustower.dev (Mr. Walker, Mr. Powers).**
 Plan `~/.claude/plans/temporal-seeking-phoenix.md`. Roblox is tabled again.
 - Mr. Walker's profile is today's HUD, unchanged. Mr. Powers gets his own chats,
