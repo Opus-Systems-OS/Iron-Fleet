@@ -32,10 +32,16 @@ api.opustower.dev {
 	}
 }
 
-# J.A.R.V.I.S. on the web. The site sets its own security headers (CSP,
-# HSTS, frame-deny); Caddy only terminates TLS. Request bodies (the unlock
+# J.A.R.V.I.S. on the web. The site sets its own security headers (CSP with
+# Trusted Types, HSTS, COOP/CORP, frame-deny) and runs its own honeypot;
+# Caddy terminates TLS, drops its Server banner, and caps bodies at the
+# site's largest (a 32 MB chat attachment). Request bodies (the unlock
 # passphrase) are never logged — Caddy's access log has no bodies.
 jarvis.opustower.dev {
+	header -Server
+	request_body {
+		max_size 34MB
+	}
 	reverse_proxy jarvis-web:8200
 	log {
 		output file /data/access-jarvis.log

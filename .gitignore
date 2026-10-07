@@ -6,6 +6,7 @@
 **/*.db-shm
 .env
 .env.*
+deploy/droplet/secrets/
 .DS_Store
 __pycache__/
 /target.nosync
