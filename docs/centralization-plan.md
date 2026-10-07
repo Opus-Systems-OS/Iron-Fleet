@@ -19,6 +19,18 @@ Written for whichever machine picks this up next (Claude memory does not
 travel between machines; this section does). Everything below is verified
 fact as of 2026-09-15 ~05:20 UTC, not plan. Phases 0–5 are complete.
 
+**Web security hardening, 2026-10-07 (PRs open: J.A.R.V.I.S-Web `security-hardening`,
+Iron-Fleet `jarvis-web-hardening`).** Trusted Types enforced by the CSP (one policy, in
+`web/src/html.ts`); `Sec-Fetch-Site` isolation on `/auth`, `/web` and `/bff`; agent files are
+forced to download as attachments under a sandbox CSP; COOP/CORP. The honeypot covers trap
+paths, a bait `/.env` holding a canary passphrase, and a lock-form honey field. Its **bans are
+permanent until lifted** (Systems → Defenses, or `docker compose exec jarvis-web jarvis-web
+unban <ip>`), and a valid unlock is never banned. Sessions lock after 2 h idle, and there is
+**Lock all**. The `osk_` keys moved to Docker secrets (`deploy/droplet/secrets/*`, 0400). The
+container is read-only, with cap_drop ALL. CI runs cargo/npm audit. Deploy order: web PR →
+image → `deploy.sh`; then this PR, deployed with **`git pull` first** (see
+`deploy/droplet/README.md` "jarvis-web keys").
+
 **▶ RIGHT NOW (2026-09-30 ~23:30 UTC, handing off Mac → Windows): Track R going live.**
 Read this block first; it is the whole state of the session that moved machines.
 - **Done today:** web profiles are **live and both logins confirmed** (entry below).

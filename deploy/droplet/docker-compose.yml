@@ -73,8 +73,13 @@ services:
   # The password gate and page at jarvis.opustower.dev, in front of the API.
   # No env_file on purpose: it gets its own variables and none of the
   # box's other secrets. The hash is single-quoted in .env ($ inside).
+  # Its two osk_ keys are Docker secrets — 0400 files in ./secrets, mounted
+  # at /run/secrets — so they never show in `docker inspect` or the
+  # process environment (deploy.sh moves them out of .env once).
   # Unset values don't break the rest of the stack: jarvis-web alone
   # refuses to start and logs which variable is missing.
+  # Locked down: read-only root, no capabilities, no privilege gain; it
+  # writes only its SQLite volume and /tmp.
   jarvis-web:
     image: ghcr.io/opus-systems-os/jarvis-web:latest
     restart: unless-stopped
@@ -82,16 +87,32 @@ services:
       PORT: "8200"
       DATABASE_PATH: /data/jarvis-web.db
       OPUS_API_URL: http://api:8100
-      WEB_API_KEY: ${WEB_API_KEY:-}
+      WEB_API_KEY_FILE: /run/secrets/web_api_key
       JARVIS_WEB_PASSWORD_HASH: ${JARVIS_WEB_PASSWORD_HASH:-}
       # Mr. Powers's profile; optional, both or neither.
-      WEB_POWERS_API_KEY: ${WEB_POWERS_API_KEY:-}
+      WEB_POWERS_API_KEY_FILE: /run/secrets/web_powers_api_key
       JARVIS_WEB_POWERS_PASSWORD_HASH: ${JARVIS_WEB_POWERS_PASSWORD_HASH:-}
       RUST_LOG: info,tower_http=info
+    secrets:
+      - web_api_key
+      - web_powers_api_key
     volumes:
       - web_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - api
+
+secrets:
+  web_api_key:
+    file: ./secrets/web_api_key
+  web_powers_api_key:
+    file: ./secrets/web_powers_api_key
 
 volumes:
   cp_data:

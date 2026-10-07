@@ -93,6 +93,31 @@ Logs: `docker compose logs -f control-plane` (in `/opt/iron-fleet/deploy/droplet
 Access logs: `docker compose exec caddy tail -f /data/access-fleet.log`
 (Caddy rolls them itself: 100 MB × 10 files, nothing to configure).
 
+### jarvis-web keys and bans
+
+jarvis-web's two `osk_` keys are Docker secrets: `secrets/web_api_key` and
+`secrets/web_powers_api_key` (dir 700, files 0400, gitignored), mounted at
+`/run/secrets/`. They are never env values, so `docker inspect jarvis-web` shows
+no key. `deploy.sh` moves them out of `.env` the first time; then delete the two
+`WEB_*API_KEY=` lines from `.env`. Both files must exist, because Powers's profile is live.
+
+The first deploy after this change must run the **new** `deploy.sh`, so pull first:
+
+```sh
+ssh root@198.199.66.109 'cd /opt/iron-fleet && git pull --ff-only && deploy/droplet/deploy.sh'
+docker inspect $(docker compose ps -q jarvis-web) --format '{{json .Config.Env}}' | grep -c osk_   # expect 0
+```
+
+The honeypot bans until someone lifts the ban. To look at bans and lift them:
+
+```sh
+docker compose exec jarvis-web jarvis-web bans
+docker compose exec jarvis-web jarvis-web unban 203.0.113.9
+```
+
+You can also use the HUD's **Systems → Defenses** panel. Any browser holding a valid unlock
+gets in even from a banned address.
+
 ## Ops (Phase 5)
 
 ### Backups
