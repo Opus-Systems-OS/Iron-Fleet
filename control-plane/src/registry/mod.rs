@@ -717,6 +717,13 @@ mod tests {
         );
         assert!(gh.mount.iter().all(|m| is_github_repo_url(m)));
         assert_eq!(reg.environments["jarvis-lab"].kind().unwrap(), "cloud");
+        // REA for the Reverse tab, preinstalled so a session doesn't spend its
+        // cap on `npm install -g`. Pinned to the version J.A.R.V.I.S-Web's
+        // prompt names. Node itself can't be pinned: the sandbox ships 22.
+        assert_eq!(
+            reg.environments["jarvis-lab"].environment.config["packages"]["npm"],
+            serde_json::json!(["rea-agents@6.5.0"])
+        );
         assert_eq!(
             (cap("blueweb-client"), effort("blueweb-client")),
             (1000, "high")
