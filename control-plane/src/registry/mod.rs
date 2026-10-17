@@ -719,10 +719,11 @@ mod tests {
         assert_eq!(reg.environments["jarvis-lab"].kind().unwrap(), "cloud");
         // REA for the Reverse tab, preinstalled so a session doesn't spend its
         // cap on `npm install -g`. Pinned to the version J.A.R.V.I.S-Web's
-        // prompt names. Node itself can't be pinned: the sandbox ships 22.
+        // prompt names. The sandbox ships Node 22; npm's `node@24` package puts
+        // Node 24 in npm's global bin, ahead of it, for REA (>= 24.15).
         assert_eq!(
             reg.environments["jarvis-lab"].environment.config["packages"]["npm"],
-            serde_json::json!(["rea-agents@6.5.0"])
+            serde_json::json!(["node@24", "rea-agents@6.5.0"])
         );
         assert_eq!(
             (cap("blueweb-client"), effort("blueweb-client")),
