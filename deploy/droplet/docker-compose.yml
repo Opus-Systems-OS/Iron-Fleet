@@ -91,11 +91,14 @@ services:
       JARVIS_WEB_PASSWORD_HASH: ${JARVIS_WEB_PASSWORD_HASH:-}
       # Mr. Powers's profile; optional, both or neither.
       WEB_POWERS_API_KEY_FILE: /run/secrets/web_powers_api_key
+      # Intel ship layer (aisstream.io, free key).
+      AISSTREAM_API_KEY_FILE: /run/secrets/aisstream_api_key
       JARVIS_WEB_POWERS_PASSWORD_HASH: ${JARVIS_WEB_POWERS_PASSWORD_HASH:-}
       RUST_LOG: info,tower_http=info
     secrets:
       - web_api_key
       - web_powers_api_key
+      - aisstream_api_key
     volumes:
       - web_data:/data
     read_only: true
@@ -113,6 +116,8 @@ secrets:
     file: ./secrets/web_api_key
   web_powers_api_key:
     file: ./secrets/web_powers_api_key
+  aisstream_api_key:
+    file: ./secrets/aisstream_api_key
 
 volumes:
   cp_data:

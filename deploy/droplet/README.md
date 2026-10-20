@@ -101,6 +101,14 @@ jarvis-web's two `osk_` keys are Docker secrets: `secrets/web_api_key` and
 no key. `deploy.sh` moves them out of `.env` the first time; then delete the two
 `WEB_*API_KEY=` lines from `.env`. Both files must exist, because Powers's profile is live.
 
+`secrets/aisstream_api_key` (same rules) holds the free aisstream.io key for
+the Intel tab's live ship layer. It must exist too, since compose refuses a
+missing secret file; write it on the droplet without echoing it:
+
+```sh
+read -rs -p "AISStream key: " K && printf %s "$K" > secrets/aisstream_api_key && chmod 400 secrets/aisstream_api_key && unset K
+```
+
 The first deploy after this change must run the **new** `deploy.sh`, so pull first:
 
 ```sh
