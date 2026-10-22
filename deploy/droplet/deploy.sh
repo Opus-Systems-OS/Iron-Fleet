@@ -26,6 +26,12 @@ for pair in WEB_API_KEY:web_api_key WEB_POWERS_API_KEY:web_powers_api_key; do
   fi
 done
 
+# jarvis-web's GitHub tokens are optional: an empty placeholder keeps compose
+# happy until one is written (then restart jarvis-web).
+for file in secrets/github_token secrets/github_powers_token; do
+  [ -e "$file" ] || { (umask 077 && : > "$file") && chmod 400 "$file"; }
+done
+
 docker compose pull
 docker compose up -d --remove-orphans
 docker compose ps
