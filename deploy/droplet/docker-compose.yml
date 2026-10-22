@@ -91,6 +91,8 @@ services:
       JARVIS_WEB_PASSWORD_HASH: ${JARVIS_WEB_PASSWORD_HASH:-}
       # Mr. Powers's profile; optional, both or neither.
       WEB_POWERS_API_KEY_FILE: /run/secrets/web_powers_api_key
+      # The Intel globe's ship layer (a free AISStream key).
+      AISSTREAM_API_KEY_FILE: /run/secrets/aisstream_api_key
       JARVIS_WEB_POWERS_PASSWORD_HASH: ${JARVIS_WEB_POWERS_PASSWORD_HASH:-}
       # Each profile's own GitHub token for the Projects tab; an empty file
       # (deploy.sh makes one) just means no GitHub for that profile yet.
@@ -100,6 +102,7 @@ services:
     secrets:
       - web_api_key
       - web_powers_api_key
+      - aisstream_api_key
       - github_token
       - github_powers_token
     volumes:
@@ -119,6 +122,8 @@ secrets:
     file: ./secrets/web_api_key
   web_powers_api_key:
     file: ./secrets/web_powers_api_key
+  aisstream_api_key:
+    file: ./secrets/aisstream_api_key
   github_token:
     file: ./secrets/github_token
   github_powers_token:
