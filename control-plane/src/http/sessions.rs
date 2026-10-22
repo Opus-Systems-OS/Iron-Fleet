@@ -80,7 +80,9 @@ const SYSTEM_SUFFIX_MAX_CHARS: usize = 4_000;
 pub const SESSION_MODELS: &[&str] = &[
     "claude-opus-5-5",
     "claude-opus-5",
+    "claude-sonnet-5-5",
     "claude-sonnet-5",
+    "claude-haiku-5-5",
     "claude-haiku-4-5-20251001",
     "claude-fable-5-1",
 ];
@@ -837,6 +839,9 @@ mod tests {
             check_model(Some("claude-sonnet-5")).unwrap(),
             Some("claude-sonnet-5")
         );
+        for m in ["claude-sonnet-5-5", "claude-haiku-5-5"] {
+            assert_eq!(check_model(Some(m)).unwrap(), Some(m));
+        }
         for bad in [
             "gpt-5",
             "claude-opus-4-1",
