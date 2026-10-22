@@ -101,6 +101,9 @@ jarvis-web's two `osk_` keys are Docker secrets: `secrets/web_api_key` and
 no key. `deploy.sh` moves them out of `.env` the first time; then delete the two
 `WEB_*API_KEY=` lines from `.env`. Both files must exist, because Powers's profile is live.
 
+The Intel globe's ship layer reads a free AISStream key from
+`secrets/aisstream_api_key` (0400), mounted the same way; that file must exist.
+
 Each profile's GitHub token for the Projects tab is a Docker secret too:
 `secrets/github_token` (Mr. Walker) and `secrets/github_powers_token`
 (Mr. Powers). Each holds a classic token with `repo` and `read:org`, made by
