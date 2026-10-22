@@ -101,6 +101,18 @@ jarvis-web's two `osk_` keys are Docker secrets: `secrets/web_api_key` and
 no key. `deploy.sh` moves them out of `.env` the first time; then delete the two
 `WEB_*API_KEY=` lines from `.env`. Both files must exist, because Powers's profile is live.
 
+Each profile's GitHub token for the Projects tab is a Docker secret too:
+`secrets/github_token` (Mr. Walker) and `secrets/github_powers_token`
+(Mr. Powers). Each holds a classic token with `repo` and `read:org`, made by
+that person. `deploy.sh` creates them empty if missing, and empty means "no
+GitHub yet" for that profile. To set one:
+
+```sh
+ssh root@198.199.66.109 'cd /opt/iron-fleet/deploy/droplet && umask 077 && cat > secrets/github_token && chmod 400 secrets/github_token && docker compose up -d --force-recreate jarvis-web'
+```
+
+(Paste the token, press Enter, then Ctrl-D.) The token never goes in `.env`.
+
 The first deploy after this change must run the **new** `deploy.sh`, so pull first:
 
 ```sh
