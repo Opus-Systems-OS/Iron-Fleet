@@ -15,6 +15,10 @@ DB=/var/lib/docker/volumes/droplet_cp_data/_data/control-plane.db
 # The API's keys database (Opus-Systems-OS-API). Optional until that service
 # has booted once; a bundle without it restores a fleet with no client keys.
 API_DB=/var/lib/docker/volumes/droplet_api_data/_data/opus-api.db
+# Opus-VPN's wg-easy state (its own compose project, /opt/opus-vpn): the
+# server key and every client's keys. wg0.conf is regenerated from it.
+# Optional too; without it every VPN client must be re-issued.
+WG_DB=/var/lib/docker/volumes/opus-vpn_wg_data/_data/wg-easy.db
 CADDY_DATA=/var/lib/docker/volumes/droplet_caddy_data/_data
 LOCAL=/var/backups/iron-fleet
 KEEP_LOCAL=3
@@ -53,17 +57,28 @@ if [[ -f "$API_DB" ]]; then
   fi
   api_keys=$(sqlite3 "$TMP/opus-api.db" 'SELECT count(*) FROM api_keys;')
 fi
+vpn_clients=absent
+if [[ -f "$WG_DB" ]]; then
+  sqlite3 "$WG_DB" ".backup '$TMP/wg-easy.db'"
+  check=$(sqlite3 "$TMP/wg-easy.db" 'PRAGMA integrity_check;')
+  if [[ "$check" != "ok" ]]; then
+    echo "backup: integrity_check failed on the VPN snapshot: $check" >&2
+    exit 1
+  fi
+  vpn_clients=$(sqlite3 "$TMP/wg-easy.db" 'SELECT count(*) FROM clients_table;')
+fi
 
 # --- secrets and TLS state -----------------------------------------------
 cp "$HERE/.env" "$TMP/env"
 cp "$HERE/backup.env" "$TMP/backup.env"
 # The volume also holds Caddy's access logs (MBs, rolling) — only certs/ACME state is worth keeping.
 tar -C "$CADDY_DATA" --exclude='access-*.log' -cf "$TMP/caddy_data.tar" .
-printf 'stamp=%s\nagents=%s\ndb_bytes=%s\napi_keys=%s\n' "$STAMP" "$agents" "$(stat -c %s "$TMP/control-plane.db")" "$api_keys" > "$TMP/MANIFEST"
+printf 'stamp=%s\nagents=%s\ndb_bytes=%s\napi_keys=%s\nvpn_clients=%s\n' "$STAMP" "$agents" "$(stat -c %s "$TMP/control-plane.db")" "$api_keys" "$vpn_clients" > "$TMP/MANIFEST"
 
 # --- encrypt + upload ----------------------------------------------------
 tar -C "$TMP" -cf - control-plane.db env backup.env caddy_data.tar MANIFEST \
     $([[ -f "$TMP/opus-api.db" ]] && echo opus-api.db) \
+    $([[ -f "$TMP/wg-easy.db" ]] && echo wg-easy.db) \
   | age -r "$AGE_RECIPIENT" -o "$LOCAL/$NAME"
 chmod 600 "$LOCAL/$NAME"
 

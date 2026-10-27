@@ -60,6 +60,11 @@ if [[ -f "$DIR/opus-api.db" ]]; then
 else
   echo "api keys: no opus-api.db in this bundle (predates the API, or it had not booted)"
 fi
+if [[ -f "$DIR/wg-easy.db" ]]; then
+  echo "vpn clients: $(sqlite3 "$DIR/wg-easy.db" 'SELECT count(*) FROM clients_table;') (wg-easy.db)"
+else
+  echo "vpn clients: no wg-easy.db in this bundle (predates Opus-VPN)"
+fi
 
 cat <<EOF
 
@@ -74,4 +79,6 @@ To re-seed a droplet from it, follow "First deploy" in deploy/droplet/README.md
 with $DIR/control-plane.db as the seed, $DIR/env as .env,
 $DIR/caddy_data.tar untarred into the droplet_caddy_data volume, and
 $DIR/opus-api.db (if present) copied into the droplet_api_data volume.
+For Opus-VPN: with wg-easy stopped, copy $DIR/wg-easy.db (if present) into
+the opus-vpn_wg_data volume, then start it; it rewrites wg0.conf itself.
 EOF
