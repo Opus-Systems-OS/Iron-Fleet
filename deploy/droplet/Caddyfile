@@ -41,10 +41,9 @@ api.opustower.dev {
 # WireGuard port, so the WireGuard keys remain the gate.
 vpn.opustower.dev {
 	header -Server
-	@wstunnel {
-		header Connection *Upgrade*
-		header Upgrade websocket
-	}
+	# Upgrade alone: wstunnel sends a lowercase `Connection: upgrade`, and
+	# header matching is case-sensitive.
+	@wstunnel header Upgrade websocket
 	handle @wstunnel {
 		reverse_proxy wstunnel:8080
 	}
