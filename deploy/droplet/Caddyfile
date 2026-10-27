@@ -35,10 +35,22 @@ api.opustower.dev {
 # Opus-VPN's wg-easy admin UI — github.com/Opus-Systems-OS/Opus-VPN, its own
 # compose project; its container joins this project's network so Caddy can
 # reach it by name. Login (plus wg-easy's own TOTP) is the only gate, and it
-# mints VPN keys, so 2FA must stay on. WireGuard itself is 51820/udp, direct.
+# mints VPN keys, so 2FA must stay on. WireGuard itself is 51820/udp, direct;
+# WebSocket upgrades go to Opus-VPN's wstunnel instead — WireGuard wrapped in
+# HTTPS for networks that block its UDP. wstunnel only forwards to wg-easy's
+# WireGuard port, so the WireGuard keys remain the gate.
 vpn.opustower.dev {
 	header -Server
-	reverse_proxy wg-easy:51821
+	@wstunnel {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle @wstunnel {
+		reverse_proxy wstunnel:8080
+	}
+	handle {
+		reverse_proxy wg-easy:51821
+	}
 	log {
 		output file /data/access-vpn.log
 	}
