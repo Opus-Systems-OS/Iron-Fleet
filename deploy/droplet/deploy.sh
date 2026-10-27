@@ -34,4 +34,8 @@ done
 
 docker compose pull
 docker compose up -d --remove-orphans
+# The Caddyfile is a single-file bind mount: git replaces the file, so a
+# running Caddy keeps reading the old one. Recreate it when they differ.
+docker compose exec -T caddy cat /etc/caddy/Caddyfile | cmp -s - Caddyfile \
+  || docker compose up -d --force-recreate caddy
 docker compose ps
