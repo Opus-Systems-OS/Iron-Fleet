@@ -140,7 +140,8 @@ gets in even from a banned address.
 Every night at 07:00 UTC (`iron-fleet-backup.timer`) `backup.sh` bundles
 `control-plane.db` (online `.backup`, then `PRAGMA integrity_check` must
 say `ok`), `.env`, `backup.env`, a tar of the `droplet_caddy_data` volume
-(certs + ACME account) and a `MANIFEST`, encrypts the tar to the age
+(certs + ACME account), `opus-api.db` and Opus-VPN's `wg-easy.db` when
+present (same `.backup` + check), and a `MANIFEST`, encrypts the tar to the age
 recipient in `backup.env`, uploads it as `iron-fleet-<stamp>.tar.age` to
 the R2 bucket, prunes objects older than `RETENTION_DAYS`, and keeps the
 newest three bundles in `/var/backups/iron-fleet/` for a restore that
