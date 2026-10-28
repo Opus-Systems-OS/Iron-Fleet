@@ -6,9 +6,9 @@
       "type": "cloud",
       "networking": { "type": "unrestricted" },
       "packages": {
-        "apt": ["gh", "jq"],
+        "apt": ["gh", "jq", "ffmpeg"],
         "npm": ["node@24", "rea-agents@6.5.0"],
-        "pip": ["playwright"]
+        "pip": ["playwright", "yt-dlp", "youtube-transcript-api"]
       }
     }
   }
