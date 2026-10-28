@@ -181,6 +181,22 @@ impl Client {
             .await
     }
 
+    /// Applies to containers started after the call; running sessions keep
+    /// the config they started with.
+    pub async fn update_environment(
+        &self,
+        id: &str,
+        def: &EnvironmentDefinition,
+    ) -> Result<Environment> {
+        self.send(
+            Method::POST,
+            &format!("/v1/environments/{id}"),
+            &[],
+            Some(def),
+        )
+        .await
+    }
+
     // ---- vaults
 
     pub async fn create_vault(&self, def: &VaultCreate) -> Result<Vault> {

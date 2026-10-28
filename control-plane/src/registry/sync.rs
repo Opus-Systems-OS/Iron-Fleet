@@ -1,6 +1,8 @@
 //! Reconcile `agents/` → Anthropic → SQLite. Idempotent; safe to run on every boot.
 //!
-//! - Environments: created once, `cloud` and `self_hosted` alike. If the
+//! - Environments: created once, `cloud` and `self_hosted` alike, then
+//!   updated in place when the file's hash changes (new sessions get the new
+//!   packages; running ones keep theirs). If the
 //!   create response for a `self_hosted` environment ever carries an
 //!   `environment_key` it is returned in `SyncReport::new_environment_keys`
 //!   instead of being stored — the rig owns that key (CLAUDE.md). In
@@ -30,6 +32,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SyncReport {
     pub environments_created: usize,
+    pub environments_updated: usize,
     pub skills_created: usize,
     pub skills_updated: usize,
     pub skills_unchanged: usize,
@@ -48,11 +51,20 @@ pub async fn sync(reg: &Registry, api: &Client, db: &Db) -> Result<SyncReport> {
 
     for (slug, file) in &reg.environments {
         let kind = file.kind()?;
+        let hash = definition_hash(&file.environment)?;
         let existing = db.environment(slug)?;
-        match existing.and_then(|e| e.environment_id) {
-            Some(id) => {
-                tracing::debug!(slug, id, kind, "environment already provisioned");
+        match existing.and_then(|e| Some((e.environment_id?, e.config_sha256))) {
+            Some((id, sent)) if sent.as_deref() == Some(hash.as_str()) => {
+                tracing::debug!(slug, id, kind, "environment unchanged");
                 db.upsert_environment(slug, kind, Some(&id))?;
+            }
+            // Also taken once for rows synced before hashes were stored: a
+            // no-op update that records the hash.
+            Some((id, _)) => {
+                api.update_environment(&id, &file.environment).await?;
+                tracing::info!(slug, id, kind, "environment updated");
+                db.upsert_environment(slug, kind, Some(&id))?;
+                report.environments_updated += 1;
             }
             None => {
                 let env = api.create_environment(&file.environment).await?;
@@ -77,6 +89,7 @@ pub async fn sync(reg: &Registry, api: &Client, db: &Db) -> Result<SyncReport> {
                 }
             }
         }
+        db.set_environment_config_hash(slug, &hash)?;
     }
 
     // name -> (skill_id, version_id) for everything under agents/skills/.
@@ -258,8 +271,9 @@ fn resolve_roster(
     Ok(out)
 }
 
-/// Hash of the canonical (serde, BTreeMap-ordered) JSON of the agent body.
-fn definition_hash(def: &crate::anthropic::types::AgentDefinition) -> Result<String> {
+/// Hash of the canonical (serde, BTreeMap-ordered) JSON of an agent or
+/// environment body.
+fn definition_hash(def: &impl serde::Serialize) -> Result<String> {
     let value = serde_json::to_value(def).map_err(|e| Error::Config(e.to_string()))?;
     let canonical = canonical_json(&value);
     Ok(hex::encode(Sha256::digest(canonical.as_bytes())))
