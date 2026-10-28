@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS environments (
   slug          TEXT PRIMARY KEY,
   kind          TEXT NOT NULL,            -- "cloud" | "self_hosted"
   anthropic_id  TEXT,                     -- NULL until provisioned by sync
-  synced_at     TEXT NOT NULL
+  synced_at     TEXT NOT NULL,
+  config_sha256 TEXT                      -- NULL until sync records what it sent
 );
 CREATE TABLE IF NOT EXISTS agents (
   slug                 TEXT PRIMARY KEY,
@@ -132,6 +133,7 @@ pub struct EnvironmentRow {
     pub kind: String,
     pub environment_id: Option<String>,
     pub synced_at: String,
+    pub config_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -269,7 +271,7 @@ impl Db {
     pub fn environment(&self, slug: &str) -> Result<Option<EnvironmentRow>> {
         self.with(|c| {
             c.query_row(
-                "SELECT slug, kind, anthropic_id, synced_at FROM environments WHERE slug = ?1",
+                "SELECT slug, kind, anthropic_id, synced_at, config_sha256 FROM environments WHERE slug = ?1",
                 [slug],
                 |r| {
                     Ok(EnvironmentRow {
@@ -277,10 +279,22 @@ impl Db {
                         kind: r.get(1)?,
                         environment_id: r.get(2)?,
                         synced_at: r.get(3)?,
+                        config_sha256: r.get(4)?,
                     })
                 },
             )
             .optional()
+        })
+    }
+
+    /// Record the hash of the definition last sent to Anthropic for `slug`.
+    pub fn set_environment_config_hash(&self, slug: &str, sha256: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "UPDATE environments SET config_sha256 = ?2 WHERE slug = ?1",
+                params![slug, sha256],
+            )?;
+            Ok(())
         })
     }
 
@@ -763,7 +777,10 @@ fn read_usage_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<UsageRow> {
 /// `PRAGMA table_info` — idempotent, and a no-op on a fresh database where
 /// `SCHEMA` already has the column.
 fn migrate(conn: &Connection) -> rusqlite::Result<()> {
-    const ADDED: &[(&str, &str, &str)] = &[("session_usage", "last_error", "TEXT")];
+    const ADDED: &[(&str, &str, &str)] = &[
+        ("session_usage", "last_error", "TEXT"),
+        ("environments", "config_sha256", "TEXT"),
+    ];
     for (table, column, ty) in ADDED {
         let present = conn
             .prepare(&format!("PRAGMA table_info({table})"))?
@@ -785,6 +802,28 @@ pub fn now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn environment_config_hash_survives_re_upsert() {
+        let db = Db::in_memory().unwrap();
+        db.upsert_environment("jarvis-lab", "cloud", Some("env_1"))
+            .unwrap();
+        assert_eq!(
+            db.environment("jarvis-lab").unwrap().unwrap().config_sha256,
+            None
+        );
+        db.set_environment_config_hash("jarvis-lab", "h1").unwrap();
+        db.upsert_environment("jarvis-lab", "cloud", Some("env_1"))
+            .unwrap();
+        assert_eq!(
+            db.environment("jarvis-lab")
+                .unwrap()
+                .unwrap()
+                .config_sha256
+                .as_deref(),
+            Some("h1")
+        );
+    }
 
     #[test]
     fn registry_round_trip() {
