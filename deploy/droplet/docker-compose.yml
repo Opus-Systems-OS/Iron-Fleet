@@ -147,8 +147,12 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    cpus: 2
-    mem_limit: 4g
+    # Sized for a 2 vCPU / 4 GB droplet. Blender's preview renders need about
+    # 1.5 GB (they were killed for lack of memory at 1 GB), and this leaves
+    # 0.5 CPU and about 2 GB for the rest. Docker refuses cpus above the host's
+    # CPU count, so this needs at least 2 vCPU.
+    cpus: 1.5
+    mem_limit: 2g
     pids_limit: 256
     networks: [opuscad]
 

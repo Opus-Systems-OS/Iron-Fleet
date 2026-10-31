@@ -137,7 +137,9 @@ because jarvis's sessions call it from Anthropic's side. Every route but `/healt
   - `deploy.sh` stops with a message if the line is missing.
   - To rotate it, change the line and run `deploy.sh`. That recreates the control plane and the worker.
 - **Sandbox:** the agent runs its own Python inside Blender, so the worker is alone on the internal
-  `opuscad` network (no outbound internet), with a read-only root, no capabilities and 2 CPU / 4 GB / 256 pids.
+  `opuscad` network (no outbound internet), with a read-only root, no capabilities and 1.5 CPU / 2 GB / 256 pids.
+  That needs the droplet at **2 vCPU / 4 GB** or more. Blender's previews need about 1.5 GB, and Docker refuses
+  `cpus: 1.5` on a 1 vCPU box.
   Caddy joins that network to reach it.
 - **Data:** projects live on the `opuscad_projects` volume.
 - **Image:** OpusCad is private, so `ghcr.io/opus-systems-os/opuscad-worker` is too. The droplet is logged in to
