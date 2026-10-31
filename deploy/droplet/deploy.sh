@@ -32,8 +32,26 @@ for file in secrets/github_token secrets/github_powers_token; do
   [ -e "$file" ] || { (umask 077 && : > "$file") && chmod 400 "$file"; }
 done
 
+# OpusCAD's worker token: the control plane reads OPUSCAD_TOKEN from .env
+# (Jarvis's vault) and the worker reads it as a Docker secret, so keep the
+# file in step with .env. A container keeps the secret it started with, so a
+# rewritten file recreates the worker below.
+value=$(grep -E '^OPUSCAD_TOKEN=' .env | tail -1 | cut -d= -f2- | tr -d "'\"" || true)
+if [ -z "$value" ]; then
+  echo "deploy: .env has no OPUSCAD_TOKEN (openssl rand -hex 32); the control plane and opuscad-worker need it" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$value" | cmp -s - secrets/opuscad_token; then
+  (umask 077 && printf '%s\n' "$value" > secrets/opuscad_token) && chmod 400 secrets/opuscad_token
+  echo "deploy: wrote secrets/opuscad_token from .env"
+  cad_token_changed=1
+fi
+
 docker compose pull
 docker compose up -d --remove-orphans
+if [ -n "${cad_token_changed:-}" ]; then
+  docker compose up -d --force-recreate opuscad-worker
+fi
 # The Caddyfile is a single-file bind mount: git replaces the file, so a
 # running Caddy keeps reading the old one. Recreate it when they differ.
 docker compose exec -T caddy cat /etc/caddy/Caddyfile | cmp -s - Caddyfile \

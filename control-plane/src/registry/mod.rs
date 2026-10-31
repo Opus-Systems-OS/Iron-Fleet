@@ -746,24 +746,33 @@ mod tests {
         // consistent, per docs.claude.com/managed-agents/mcp-connector: "The
         // API rejects agent definitions with unreferenced servers or
         // dangling toolsets."
+        // Two servers: mcp-fleet, and the OpusCAD worker (Blender) at its public URL.
         let mcp_servers = &reg.agents["jarvis"].agent.mcp_servers;
-        assert_eq!(mcp_servers.len(), 1);
-        assert_eq!(mcp_servers[0]["name"], "fleet");
+        let urls: Vec<(&str, &str)> = mcp_servers
+            .iter()
+            .map(|s| (s["name"].as_str().unwrap(), s["url"].as_str().unwrap()))
+            .collect();
         assert_eq!(
-            mcp_servers[0]["url"],
-            "https://mcp-fleet.internal.example/mcp"
+            urls,
+            [
+                ("fleet", "https://mcp-fleet.internal.example/mcp"),
+                ("opuscad", "https://cad.opustower.dev/mcp")
+            ]
         );
         assert!(
-            mcp_servers[0].get("authorization_token").is_none(),
+            mcp_servers
+                .iter()
+                .all(|s| s.get("authorization_token").is_none()),
             "auth is a session-time vault_ids concern, not an agent-level field"
         );
-        let toolset = reg.agents["jarvis"]
+        let toolsets: Vec<&str> = reg.agents["jarvis"]
             .agent
             .tools
             .iter()
-            .find(|t| t["type"] == "mcp_toolset")
-            .expect("jarvis declares a matching mcp_toolset entry");
-        assert_eq!(toolset["mcp_server_name"], "fleet");
+            .filter(|t| t["type"] == "mcp_toolset")
+            .filter_map(|t| t["mcp_server_name"].as_str())
+            .collect();
+        assert_eq!(toolsets, ["fleet", "opuscad"], "one toolset per server");
     }
 
     /// A scratch `agents/` with cloud-default and one file per `(slug, multiagent)`.
@@ -1120,12 +1129,21 @@ mod tests {
             assert!(reg.agents[slug].credentials.is_empty(), "{slug}");
             assert!(reg.agents[slug].github.is_none(), "{slug}");
         }
-        // jarvis holds exactly one secret — the org read token, as GH_TOKEN on
-        // api.github.com — never blueweb's write token.
-        let jc = &reg.agents["jarvis"].credentials;
-        assert_eq!(jc.len(), 1);
-        assert_eq!(jc[0].key(), "GH_TOKEN");
-        assert_eq!(jc[0].env_var(), "JARVIS_GITHUB_READ_TOKEN");
+        // jarvis holds exactly two secrets — the org read token, as GH_TOKEN on
+        // api.github.com, and the OpusCAD worker's bearer — never blueweb's
+        // write token.
+        let jc: Vec<(&str, &str)> = reg.agents["jarvis"]
+            .credentials
+            .iter()
+            .map(|c| (c.key(), c.env_var()))
+            .collect();
+        assert_eq!(
+            jc,
+            [
+                ("GH_TOKEN", "JARVIS_GITHUB_READ_TOKEN"),
+                ("https://cad.opustower.dev/mcp", "OPUSCAD_TOKEN")
+            ]
+        );
         // The token itself is never in a registry file.
         for file in json_files(&repo_agents_dir()).unwrap() {
             let text = std::fs::read_to_string(&file).unwrap();
