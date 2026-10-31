@@ -123,6 +123,37 @@ ssh root@198.199.66.109 'cd /opt/iron-fleet && git pull --ff-only && deploy/drop
 docker inspect $(docker compose ps -q jarvis-web) --format '{{json .Config.Env}}' | grep -c osk_   # expect 0
 ```
 
+### OpusCAD worker
+
+`cad.opustower.dev` is the OpusCAD worker's MCP (github.com/Opus-Systems-OS/OpusCad):
+headless Blender that jarvis drives to build models and export them as FBX, GLB or STL. It must be public,
+because jarvis's sessions call it from Anthropic's side. Every route but `/health` needs its bearer token.
+
+- **DNS:** an `A` record (and `AAAA`) for `cad` pointing at the droplet, **DNS-only** in Cloudflare like the
+  other hosts.
+- **Token:** one `OPUSCAD_TOKEN=` line in `.env` (`openssl rand -hex 32`).
+  - The control plane reads it from there into jarvis's vault, and registry sync fails without it.
+  - `deploy.sh` copies it into `secrets/opuscad_token` (0400), which the worker reads.
+  - `deploy.sh` stops with a message if the line is missing.
+  - To rotate it, change the line and run `deploy.sh`. That recreates the control plane and the worker.
+- **Sandbox:** the agent runs its own Python inside Blender, so the worker is alone on the internal
+  `opuscad` network (no outbound internet), with a read-only root, no capabilities and 2 CPU / 4 GB / 256 pids.
+  Caddy joins that network to reach it.
+- **Data:** projects live on the `opuscad_projects` volume.
+- **Image:** OpusCad is private, so `ghcr.io/opus-systems-os/opuscad-worker` is too. The droplet is logged in to
+  GHCR (`/root/.docker/config.json`) with a **classic** token that has only `read:packages`. GHCR takes no
+  fine-grained tokens. Without the login, `docker compose pull` fails with "unauthorized" and `deploy.sh` stops
+  before restarting anything. To log in again (paste the token, press Enter, then Ctrl-D):
+
+  ```sh
+  ssh root@198.199.66.109 'docker login ghcr.io -u Opus1247 --password-stdin'
+  ```
+
+```sh
+curl -sS https://cad.opustower.dev/health                                      # {"ok": true}
+curl -sS -H "Authorization: Bearer $OPUSCAD_TOKEN" https://cad.opustower.dev/projects
+```
+
 The honeypot bans until someone lifts the ban. To look at bans and lift them:
 
 ```sh

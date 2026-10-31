@@ -18,11 +18,14 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    # `opuscad` is internal (no internet); Caddy joins it only to reach the worker.
+    networks: [default, opuscad]
     depends_on:
       - control-plane
       - mcp-fleet
       - api
       - jarvis-web
+      - opuscad-worker
 
   control-plane:
     image: ghcr.io/opus-systems-os/iron-fleet/control-plane:latest
@@ -117,6 +120,42 @@ services:
     depends_on:
       - api
 
+  # OpusCAD — github.com/Opus-Systems-OS/OpusCad. Headless Blender that
+  # Jarvis drives over MCP at cad.opustower.dev/mcp (models, Roblox exports,
+  # STL for printing). The agent runs its own Python inside Blender, so the
+  # worker sits alone on the internal `opuscad` network: no outbound internet,
+  # read-only root, no capabilities, CPU/memory/process caps. Its bearer token
+  # is a Docker secret that deploy.sh writes from OPUSCAD_TOKEN in .env (the
+  # control plane also reads it there, for Jarvis's vault). No env_file.
+  # Its image is private (the repo is), so this box is logged in to ghcr.io;
+  # without that, `compose pull` fails and deploy.sh stops (README).
+  opuscad-worker:
+    image: ghcr.io/opus-systems-os/opuscad-worker:latest
+    restart: unless-stopped
+    init: true
+    environment:
+      OPUSCAD_TOKEN_FILE: /run/secrets/opuscad_token
+    secrets:
+      - opuscad_token
+    volumes:
+      - opuscad_projects:/opt/opuscad/worker/vendor/RoForge/projects
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /opt/opuscad/worker/vendor/RoForge/.runtime:uid=10001,gid=10001
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: 2
+    mem_limit: 4g
+    pids_limit: 256
+    networks: [opuscad]
+
+networks:
+  opuscad:
+    internal: true
+
 secrets:
   web_api_key:
     file: ./secrets/web_api_key
@@ -128,10 +167,13 @@ secrets:
     file: ./secrets/github_token
   github_powers_token:
     file: ./secrets/github_powers_token
+  opuscad_token:
+    file: ./secrets/opuscad_token
 
 volumes:
   cp_data:
   api_data:
   web_data:
+  opuscad_projects:
   caddy_data:
   caddy_config:

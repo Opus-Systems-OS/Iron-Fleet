@@ -70,3 +70,23 @@ jarvis.opustower.dev {
 		output file /data/access-jarvis.log
 	}
 }
+
+# OpusCAD's worker (github.com/Opus-Systems-OS/OpusCad). Public because
+# Jarvis's sessions call its MCP from Anthropic's side; the worker's bearer
+# token (secrets/opuscad_token) gates every route but /health. A bake can hold
+# one MCP request open for up to 30 minutes, hence the long proxy timeouts.
+cad.opustower.dev {
+	header -Server
+	request_body {
+		max_size 4MB
+	}
+	reverse_proxy opuscad-worker:8790 {
+		transport http {
+			read_timeout 35m
+			write_timeout 35m
+		}
+	}
+	log {
+		output file /data/access-cad.log
+	}
+}
