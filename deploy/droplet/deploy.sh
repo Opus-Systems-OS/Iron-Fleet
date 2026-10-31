@@ -32,6 +32,13 @@ for file in secrets/github_token secrets/github_powers_token; do
   [ -e "$file" ] || { (umask 077 && : > "$file") && chmod 400 "$file"; }
 done
 
+# The API's token key is made once, by hand, and never regenerated: a new
+# key can't read tokens the old one sealed (see README, "API token key").
+if [ ! -s secrets/token_key ]; then
+  echo "deploy: secrets/token_key is missing; the API needs it (README, \"API token key\")" >&2
+  exit 1
+fi
+
 docker compose pull
 docker compose up -d --remove-orphans
 # The Caddyfile is a single-file bind mount: git replaces the file, so a

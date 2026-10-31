@@ -61,6 +61,10 @@ services:
       PORT: "8100"
       DATABASE_PATH: /data/opus-api.db
       CONTROL_PLANE_URL: http://control-plane:8080
+      # Encrypts the OAuth tokens (Gmail, Calendar, WHOOP…) in its DB.
+      TOKEN_KEY_FILE: /run/secrets/token_key
+    secrets:
+      - token_key
     volumes:
       - api_data:/data
       # The ops panel's Docker row: the engine socket, read-only. The API
@@ -118,6 +122,8 @@ services:
       - api
 
 secrets:
+  token_key:
+    file: ./secrets/token_key
   web_api_key:
     file: ./secrets/web_api_key
   web_powers_api_key:

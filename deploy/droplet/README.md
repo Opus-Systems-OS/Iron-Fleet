@@ -116,6 +116,21 @@ ssh root@198.199.66.109 'cd /opt/iron-fleet/deploy/droplet && umask 077 && cat >
 
 (Paste the token, press Enter, then Ctrl-D.) The token never goes in `.env`.
 
+### API token key
+
+The API encrypts the OAuth tokens in its DB (Gmail, Calendar, YouTube, WHOOP,
+Buffer) with the 32-byte key in `secrets/token_key` (0600, gitignored), mounted
+at `/run/secrets/token_key`. Make it once:
+
+```sh
+ssh root@198.199.66.109 "cd /opt/iron-fleet/deploy/droplet && umask 077 && test ! -e secrets/token_key && openssl rand -hex 32 > secrets/token_key"
+```
+
+Never replace it: a new key can't read the tokens the old one sealed, and
+every source would have to be reconnected. `backup.sh` leaves it out of the
+backups on purpose (it and the DB together expose the tokens), so keep a copy
+of it somewhere else, such as a password manager. `deploy.sh` stops if it's missing.
+
 The first deploy after this change must run the **new** `deploy.sh`, so pull first:
 
 ```sh
