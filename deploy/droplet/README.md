@@ -140,6 +140,14 @@ because jarvis's sessions call it from Anthropic's side. Every route but `/healt
   `opuscad` network (no outbound internet), with a read-only root, no capabilities and 2 CPU / 4 GB / 256 pids.
   Caddy joins that network to reach it.
 - **Data:** projects live on the `opuscad_projects` volume.
+- **Image:** OpusCad is private, so `ghcr.io/opus-systems-os/opuscad-worker` is too. The droplet is logged in to
+  GHCR (`/root/.docker/config.json`) with a **classic** token that has only `read:packages`. GHCR takes no
+  fine-grained tokens. Without the login, `docker compose pull` fails with "unauthorized" and `deploy.sh` stops
+  before restarting anything. To log in again (paste the token, press Enter, then Ctrl-D):
+
+  ```sh
+  ssh root@198.199.66.109 'docker login ghcr.io -u Opus1247 --password-stdin'
+  ```
 
 ```sh
 curl -sS https://cad.opustower.dev/health                                      # {"ok": true}

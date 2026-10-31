@@ -127,6 +127,8 @@ services:
   # read-only root, no capabilities, CPU/memory/process caps. Its bearer token
   # is a Docker secret that deploy.sh writes from OPUSCAD_TOKEN in .env (the
   # control plane also reads it there, for Jarvis's vault). No env_file.
+  # Its image is private (the repo is), so this box is logged in to ghcr.io;
+  # without that, `compose pull` fails and deploy.sh stops (README).
   opuscad-worker:
     image: ghcr.io/opus-systems-os/opuscad-worker:latest
     restart: unless-stopped
