@@ -63,15 +63,34 @@ services:
       CONTROL_PLANE_URL: http://control-plane:8080
       # Encrypts the OAuth tokens (Gmail, Calendar, WHOOP…) in its DB.
       TOKEN_KEY_FILE: /run/secrets/token_key
+      # The ops panel's Docker row, through docker-proxy (overrides .env).
+      DOCKER_SOCKET: tcp://docker-proxy:2375
     secrets:
       - token_key
     volumes:
       - api_data:/data
-      # The ops panel's Docker row: the engine socket, read-only. The API
-      # only ever GETs /containers/json over it.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - default
+      - docker
     depends_on:
       - control-plane
+      - docker-proxy
+
+  # The engine socket, with only GET /containers let through: a :ro mount
+  # doesn't limit the Docker API, so the API never holds the socket itself.
+  # On its own internal network, which only the API joins.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      POST: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker
+    security_opt:
+      - no-new-privileges:true
 
   # J.A.R.V.I.S. on the web — github.com/Opus-Systems-OS/J.A.R.V.I.S-Web.
   # The password gate and page at jarvis.opustower.dev, in front of the API.
@@ -134,6 +153,12 @@ secrets:
     file: ./secrets/github_token
   github_powers_token:
     file: ./secrets/github_powers_token
+
+networks:
+  default:
+  # No route out; only docker-proxy and the API are on it.
+  docker:
+    internal: true
 
 volumes:
   cp_data:
